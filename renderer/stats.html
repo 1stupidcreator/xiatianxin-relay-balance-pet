@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';" />
+<title>账号余额桌宠 · 使用与缓存统计</title>
+<style>
+  /* ========== Design Tokens ========== */
+  :root {
+    color-scheme: dark;
+    /* 字体 */
+    --font-primary: "Segoe UI", "Microsoft YaHei UI", -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif;
+
+    /* 与设置页统一的暖中性深色。 */
+    --surface-0: #171716;
+    --surface-1: #20201e;
+    --surface-border: #41413b;
+
+    --text-primary: #f1f0e9;
+    --text-secondary: #cccac0;
+    --text-tertiary: #aaa89d;
+    --text-muted: #aaa89d;
+
+    --accent-primary: #c7d8ac;
+
+    --data-warning: #f3a29a;
+    --data-warning-bg: rgba(243, 162, 154, 0.08);
+    --data-success: #a7d6b0;
+
+    /* 间距 */
+    --space-xs: 0.25rem;
+    --space-sm: 0.5rem;
+    --space-md: 0.75rem;
+    --space-lg: 1rem;
+    --space-xl: 1.5rem;
+    --space-2xl: 2rem;
+
+    /* 圆角 */
+    --radius-sm: 0.375rem;
+    --radius-md: 0.5rem;
+    --radius-lg: 0.5rem;
+
+    /* 过渡 */
+    --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-base: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* ========== Base Reset ========== */
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: #55554d transparent;
+  }
+
+  body {
+    font-family: var(--font-primary);
+    background: var(--surface-0);
+    color: var(--text-primary);
+    padding: 24px 28px;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    line-height: 1.6;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: #55554d transparent;
+  }
+
+  /* ========== Header ========== */
+  h1 {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0 0 var(--space-xl);
+    color: var(--text-primary);
+    letter-spacing: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+  }
+
+  #refreshInfo {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: 400;
+    margin-left: auto;
+  }
+
+  /* ========== Toolbar ========== */
+  .toolbar {
+    display: flex;
+    gap: var(--space-sm);
+    align-items: center;
+    margin: 0 0 var(--space-lg);
+    flex-wrap: wrap;
+  }
+
+  .toolbar > span {
+    font-size: 13px;
+    color: var(--text-tertiary);
+    font-weight: 500;
+  }
+
+  .range-btn {
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-md);
+    min-height: 36px;
+    padding: 7px 14px;
+    background: var(--surface-1);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-family: var(--font-primary);
+    font-size: 14px;
+    font-weight: 500;
+    transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  }
+
+  .range-btn:hover {
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+    background: #30302c;
+  }
+
+  .range-btn.active {
+    color: var(--surface-0);
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+  }
+
+  .range-btn:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+  }
+
+  .range-btn.refresh {
+    margin-left: auto;
+  }
+
+  .range-btn:disabled {
+    color: var(--text-tertiary);
+    border-color: var(--surface-border);
+    background: var(--surface-1);
+    cursor: default;
+  }
+
+  .range-btn:active:not(:disabled) {
+    background: #41413b;
+  }
+
+  #rangeInfo {
+    color: var(--text-tertiary);
+    font-size: 13px;
+    margin: calc(var(--space-sm) * -1) 0 var(--space-lg);
+  }
+
+  /* ========== Cache Monitor Panel ========== */
+  #cacheMonitorPanel {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md) var(--space-lg);
+    flex-wrap: wrap;
+    background: var(--surface-1);
+    border: 1px solid var(--surface-border);
+    border-left: 1px solid var(--data-success);
+    border-radius: var(--radius-lg);
+    padding: 14px 18px;
+    margin: 0 0 var(--space-xl);
+    min-height: 4rem;
+  }
+
+  #cacheMonitorPanel.low {
+    border-left-color: var(--data-warning);
+    background: var(--data-warning-bg);
+  }
+
+  #cacheMonitorPanel.error {
+    border-left-color: var(--data-warning);
+    background: var(--surface-1);
+  }
+
+  #cacheMonitorPanel.pending,
+  #cacheMonitorPanel.partial,
+  #cacheMonitorPanel.idle {
+    border-left-color: var(--accent-primary);
+  }
+
+  #cacheMonitorRate {
+    min-width: 4.5rem;
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-primary);
+    letter-spacing: 0;
+  }
+
+  #cacheMonitorPanel.low #cacheMonitorRate {
+    color: var(--data-warning);
+  }
+
+  #cacheMonitorStatus {
+    font-size: 14px;
+    color: var(--text-primary);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  #cacheMonitorPanel.low #cacheMonitorStatus {
+    color: var(--data-warning);
+  }
+
+  #cacheMonitorInfo {
+    flex: 1 1 16rem;
+    font-size: 13px;
+    color: var(--text-tertiary);
+    line-height: 1.6;
+  }
+
+  /* 本机滚动窗口与账号历史统计分别显示。 */
+  #localCachePanel {
+    margin-bottom: 16px;
+  }
+
+  .local-cache-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-sm) var(--space-lg);
+    flex-wrap: wrap;
+  }
+
+  .local-cache-heading h2 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  #localCacheUpdated,
+  #localCacheSource,
+  #localCacheMessage,
+  .local-cache-info,
+  .local-cache-formula {
+    font-size: 13px;
+    color: var(--text-tertiary);
+    line-height: 1.6;
+  }
+
+  #localCacheSource {
+    margin: var(--space-xs) 0 var(--space-md);
+  }
+
+  .local-cache-windows {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-md);
+    background: var(--surface-1);
+  }
+
+  .local-cache-window {
+    padding: 16px 18px;
+    min-width: 0;
+  }
+
+  .local-cache-window + .local-cache-window {
+    border-left: 1px solid var(--surface-border);
+  }
+
+  .local-cache-label {
+    font-size: 14px;
+    color: var(--text-secondary);
+  }
+
+  .local-cache-value {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-md);
+    margin: var(--space-xs) 0 var(--space-sm);
+    flex-wrap: wrap;
+  }
+
+  .local-cache-value strong {
+    font-family: var(--font-primary);
+    font-size: 28px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+  }
+
+  .local-cache-value span {
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
+  .local-cache-window.low .local-cache-value strong,
+  .local-cache-window.low .local-cache-value span,
+  #localCachePanel.error #localCacheMessage {
+    color: var(--data-warning);
+  }
+
+  .local-cache-info {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  #localCacheMessage {
+    margin: var(--space-sm) 0 var(--space-xs);
+  }
+
+  .local-cache-formula {
+    margin: 0;
+  }
+
+  .account-history-heading {
+    font-size: 15px;
+    margin: 28px 0 14px;
+    padding-top: 20px;
+    border-top: 1px solid var(--surface-border);
+    font-weight: 600;
+  }
+
+  /* ========== Stat Cards ========== */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: var(--space-xl);
+  }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-lg);
+    padding: 14px 16px;
+    min-width: 0;
+  }
+
+  .card .k {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-sm);
+    font-weight: 500;
+    letter-spacing: 0;
+  }
+
+  .card .v {
+    font-size: 23px;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-primary);
+    letter-spacing: 0;
+    overflow-wrap: anywhere;
+  }
+
+  /* ========== Chart Boxes ========== */
+  .chartbox {
+    background: var(--surface-1);
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    position: relative;
+    margin-bottom: var(--space-xl);
+  }
+
+  canvas {
+    width: 100%;
+    height: 15rem;
+    display: block;
+  }
+
+  #cacheChart {
+    height: 9rem;
+  }
+
+  .legend {
+    display: flex;
+    gap: var(--space-xl);
+    font-size: 13px;
+    color: var(--text-tertiary);
+    margin-top: var(--space-lg);
+    padding-left: var(--space-xs);
+    flex-wrap: wrap;
+  }
+
+  .legend span {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+
+  .legend i {
+    display: inline-block;
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+  }
+
+  .empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-tertiary);
+    font-size: 14px;
+    background: var(--surface-1);
+    text-align: center;
+    line-height: 1.8;
+    border-radius: var(--radius-lg);
+  }
+
+  /* ========== Footer Tip ========== */
+  .tip-line {
+    font-size: 13px;
+    color: var(--text-tertiary);
+    line-height: 1.7;
+    padding: 0 0 12px;
+  }
+
+  .tip-line br {
+    display: block;
+    content: "";
+    margin-top: var(--space-sm);
+  }
+
+  ::selection {
+    color: var(--surface-0);
+    background: var(--accent-primary);
+  }
+
+  /* ========== Accessibility ========== */
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* ========== Responsive ========== */
+  @media (max-width: 720px) {
+    .cards {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    #refreshInfo {
+      display: block;
+      margin: var(--space-xs) 0 0;
+    }
+
+    #cacheMonitorPanel {
+      padding: var(--space-md) var(--space-lg);
+    }
+  }
+
+  @media (max-width: 520px) {
+    body {
+      padding: 20px;
+    }
+
+    .cards {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .range-btn.refresh {
+      margin-left: 0;
+    }
+
+    .local-cache-windows {
+      grid-template-columns: 1fr;
+    }
+
+    .local-cache-window + .local-cache-window {
+      border-left: 0;
+      border-top: 1px solid var(--surface-border);
+    }
+  }
+</style>
+</head>
+<body>
+  <h1><span id="windowTitle">使用与缓存统计</span><span id="refreshInfo" role="status" aria-live="polite"></span></h1>
+  <section id="localCachePanel" aria-labelledby="localCacheTitle">
+    <div class="local-cache-heading"><h2 id="localCacheTitle">CC Switch 实时缓存</h2><span id="localCacheUpdated">正在采样…</span></div>
+    <p id="localCacheSource">CC Switch · 本机 Codex 代理 · 仅本机代理记录，不代表账号全部 Key</p>
+    <div class="local-cache-windows">
+      <div class="local-cache-window" id="localCacheMinute">
+        <div class="local-cache-label">最近 1 分钟 · 告警判断窗口</div>
+        <div class="local-cache-value"><strong id="localCacheMinuteRate">--</strong><span id="localCacheMinuteStatus">读取中</span></div>
+        <p class="local-cache-info" id="localCacheMinuteInfo">正在读取最近 60 秒用量…</p>
+      </div>
+      <div class="local-cache-window" id="localCacheHour">
+        <div class="local-cache-label">最近 1 小时</div>
+        <div class="local-cache-value"><strong id="localCacheHourRate">--</strong><span id="localCacheHourStatus">读取中</span></div>
+        <p class="local-cache-info" id="localCacheHourInfo">正在读取最近 60 分钟用量…</p>
+      </div>
+    </div>
+    <p id="localCacheMessage" role="status" aria-live="polite">每 5 秒更新显示；告警每分钟按最近 60 秒判断。</p>
+    <p class="local-cache-formula">缓存率 = 缓存读取 Token ÷ 总输入 Token，按有效 Token 加权；失败请求、未知或异常 Token 口径计入排除数。样本口径不完整的窗口不显示缓存率，也不告警。</p>
+  </section>
+  <div id="cacheMonitorPanel" role="status" aria-live="polite">
+    <strong id="cacheMonitorRate">--</strong>
+    <span id="cacheMonitorStatus">1 分钟缓存告警 · 等待数据</span>
+    <span id="cacheMonitorInfo">每分钟读取 CC Switch 最近 60 秒数据，低于 80% 时通知；无有效用量不告警。</span>
+  </div>
+  <h2 class="account-history-heading">JWT 账号历史统计</h2>
+  <div class="toolbar" aria-label="账号历史统计时间范围"><span>时间范围</span><button class="range-btn active" data-hours="24" aria-pressed="true">24 小时</button><button class="range-btn" data-hours="72" aria-pressed="false">72 小时</button><button class="range-btn" data-hours="144" aria-pressed="false">144 小时</button><button id="refreshBtn" class="range-btn refresh">刷新全部</button></div>
+  <div id="rangeInfo">正在读取账号历史用量…</div>
+  <div class="cards">
+    <div class="card"><div class="k" id="kBalance">当前余额</div><div class="v" id="cBalance">--</div></div>
+    <div class="card"><div class="k" id="usedLabel">24 小时消耗</div><div class="v" id="cUsed">--</div></div>
+    <div class="card"><div class="k">今日消耗</div><div class="v" id="cToday">--</div></div>
+    <div class="card"><div class="k" id="cacheLabel">24 小时缓存命中率</div><div class="v" id="cCacheRate">--</div></div>
+    <div class="card"><div class="k">缓存命中 Token</div><div class="v" id="cCacheTokens">--</div></div>
+    <div class="card"><div class="k">请求数</div><div class="v" id="cRequests">--</div></div>
+    <div class="card"><div class="k">总 Token</div><div class="v" id="cTokens">--</div></div>
+  </div>
+  <div class="chartbox"><canvas id="chart" width="1320" height="660"></canvas><div class="legend"><span><i style="background:#536ba9"></i>余额曲线（左轴）</span><span><i style="background:rgba(210,110,90,.75)"></i>每小时实际消耗（右轴）</span></div><div class="empty" id="emptyHint" style="display:none;">这个时段暂无使用记录。</div></div>
+  <div class="chartbox"><canvas id="cacheChart" width="1320" height="380"></canvas><div class="legend"><span><i style="background:#4c9b83"></i>每小时缓存命中率</span></div><div class="empty" id="cacheEmpty" style="display:none;">暂无缓存 Token 字段，无法计算缓存命中率。</div></div>
+  <div class="tip-line"><span id="cacheBreakdown">缓存数据读取中…</span><br/>· 缓存命中率 = 缓存读取 Token ÷ 全部输入 Token（包含缓存读取、缓存写入与未缓存输入），按 Token 加权。<br/>· 消耗与缓存来自账号统计，包含所有 Key，消费显示实际扣费。最近 24/72/144 个小时段包含当前未满小时。余额曲线来自本机采样；未配置账号时仅估算消费，缓存率不可用。</div>
+  <script src="stats.js"></script>
+</body>
+</html>

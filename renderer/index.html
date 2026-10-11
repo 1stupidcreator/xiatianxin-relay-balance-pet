@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:;" />
+<title>relay-balance-pet</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: transparent; overflow: hidden;
+    font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+    user-select: none; -webkit-user-select: none;
+  }
+  .dshp-root {
+    position: fixed; inset: 0;
+    cursor: grab; touch-action: none;
+    --dshp-u: calc(100vw / 1026);
+  }
+  .dshp-root.dshp-left { transform: scaleX(-1); }
+  .dshp-root.dshp-dragging { cursor: grabbing; }
+  .dshp-body {
+    position: absolute; inset: 0;
+    transform-origin: 50% 100%;
+    transition: transform .22s cubic-bezier(.34,1.56,.64,1);
+  }
+  /* 裁齐内置图下沿的透明与渐隐末端，让衣服实边贴底；人物与气泡一起移动。 */
+  .dshp-root:not(.dshp-custom-image) .dshp-body {
+    top: calc(var(--dshp-u) * 88); bottom: auto; height: 100%;
+    transform-origin: 50% calc(100% - var(--dshp-u) * 88);
+  }
+  .dshp-body.dshp-bounce {
+    animation: dshpBounce .5s cubic-bezier(.34,1.56,.64,1);
+  }
+  @keyframes dshpBounce {
+    0% { transform: scale(1,1) translateY(0); }
+    35% { transform: scale(.94,1.12) translateY(-4%); }
+    70% { transform: scale(1.04,.94) translateY(2%); }
+    100% { transform: scale(1,1) translateY(0); }
+  }
+  .dshp-img { width: 100%; height: 100%; display: block; object-fit: contain; pointer-events: none; -webkit-user-drag: none; user-select: none; }
+  .dshp-root.dshp-idle .dshp-img { opacity: .4; }
+  .dshp-root.dshp-idle .dshp-text { opacity: .4; }
+  .dshp-text {
+    position: absolute; left: 57.5%; top: 14%; width: 42.5%; height: 40%;
+    box-sizing: border-box; padding: 2px 4px;
+    display: flex; flex-direction: column; justify-content: center;
+    border-radius: 50%;
+    background: #fffefa;
+    border: .8px solid #d1b9bd;
+    box-shadow: 0 1px 3px rgba(166, 122, 130, .08);
+    text-align: center; color: #514044; line-height: 1.4;
+    white-space: nowrap; overflow: visible; pointer-events: none; z-index: 1;
+  }
+  /* 沿用旧版椭圆与两颗小圆点；一起镜像，只有文字反向补偿。 */
+  .dshp-root.dshp-left .dshp-text > div { transform: scaleX(-1); }
+  .dshp-text::before, .dshp-text::after {
+    content: ""; position: absolute; box-sizing: border-box;
+    border-radius: 50%; background: #fffefa;
+    border: .7px solid #d1b9bd;
+    box-shadow: 0 1px 2px rgba(166, 122, 130, .06);
+    z-index: 2;
+  }
+  .dshp-text::before {
+    left: calc(var(--dshp-u) * -33); top: 65%;
+    width: calc(var(--dshp-u) * 34); height: calc(var(--dshp-u) * 34);
+  }
+  .dshp-text::after {
+    left: calc(var(--dshp-u) * -55); top: 76%;
+    width: calc(var(--dshp-u) * 20); height: calc(var(--dshp-u) * 20);
+  }
+  .dshp-label {
+    font-size: 8.5px;
+    font-weight: 500;
+    letter-spacing: 0;
+    color: #60514e;
+  }
+  .dshp-amount {
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: #352b2a;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+  }
+  .dshp-label, .dshp-amount, .dshp-hint, .dshp-time {
+    display: block;
+    flex: 0 0 auto;
+    max-width: 100%;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  .dshp-amount.dshp-low { color: #c84843; }
+  .dshp-hint  {
+    font-size: 10.5px;
+    line-height: 1.4;
+    color: #231c20;
+    font-weight: 700;
+    letter-spacing: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .dshp-today-label { display: block; font-size: 8px; font-weight: 500; color: #51403d; }
+  .dshp-today-value { display: block; font-size: 10.5px; font-weight: 800; color: #171216; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .dshp-time  {
+    font-size: 8px;
+    color: #665058;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .dshp-root.dshp-has-time .dshp-text { height: 46%; }
+  @media (max-width: 110px) {
+    .dshp-text { left: 55%; width: 42%; height: 44%; padding: 2px 3px; }
+    .dshp-root.dshp-has-time .dshp-text { height: 52%; }
+    .dshp-label { font-size: 7.5px; }
+    .dshp-amount { font-size: 11px; }
+    .dshp-hint { font-size: 8.5px; }
+    .dshp-today-value { font-size: 8px; }
+    .dshp-today-label, .dshp-time { font-size: 7px; }
+  }
+  @media (min-width: 180px) {
+    .dshp-text { padding: 5px 8px; }
+    .dshp-label { font-size: 10px; }
+    .dshp-amount { font-size: 18px; }
+    .dshp-hint, .dshp-today-value { font-size: 12px; }
+    .dshp-today-label, .dshp-time { font-size: 9px; }
+  }
+
+  .dshp-size { display: none; }
+
+</style>
+</head>
+<body>
+  <div class="dshp-root" id="root">
+    <div class="dshp-body" id="body">
+      <img class="dshp-img" id="img" src="../assets/portrait.png" alt="账号余额 · 透明半身少女" draggable="false" />
+      <div class="dshp-text" id="textBox">
+        <div class="dshp-label" id="labelEl">账号余额</div>
+        <div class="dshp-amount" id="amountEl">--</div>
+        <div class="dshp-hint" id="hintEl">加载中…</div>
+        <div class="dshp-time" id="timeEl"></div>
+      </div>
+    </div>
+  </div>
+  <script src="pet.js"></script>
+</body>
+</html>

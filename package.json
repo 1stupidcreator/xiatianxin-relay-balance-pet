@@ -1,0 +1,55 @@
+{
+  "name": "relay-balance-pet",
+  "version": "1.1.16",
+  "description": "Windows 账号余额桌宠，支持 Sub2API / DeepSeek 余额、JWT 使用统计与 CC Switch 本机缓存率提醒。",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "smoke": "electron . --smoke-test",
+    "dist:win": "electron-builder --win portable --x64"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "43.4.1",
+    "electron-builder": "26.15.3",
+    "png-to-ico": "3.0.2"
+  },
+  "build": {
+    "appId": "com.relay.balance-pet",
+    "productName": "Relay-Balance-Pet",
+    "files": [
+      "main.js",
+      "window-placement.js",
+      "ccswitch-cache.js",
+      "preload.js",
+      "renderer/index.html",
+      "renderer/pet.js",
+      "renderer/settings.html",
+      "renderer/settings.js",
+      "renderer/stats.html",
+      "renderer/stats.js",
+      "assets/portrait.png",
+      "assets/app-icon.png",
+      "package.json",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.md"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": true
+    },
+    "portable": {
+      "artifactName": "Relay-Balance-Pet-${version}-portable.exe"
+    }
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

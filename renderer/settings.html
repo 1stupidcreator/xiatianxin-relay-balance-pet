@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';" />
+<title>账号余额桌宠 · 设置</title>
+<style>
+  /* ========== Design Tokens ========== */
+  :root {
+    color-scheme: dark;
+    /* 字体 */
+    --font-primary: "Segoe UI", "Microsoft YaHei UI", -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif;
+
+    /* 暖中性深色，优先保证长说明与表单可读。 */
+    --surface-0: #171716;
+    --surface-1: #20201e;
+    --surface-2: #2a2a27;
+    --surface-border: #41413b;
+    --surface-border-focus: #77776a;
+    --surface-hover: #30302c;
+
+    --text-primary: #f1f0e9;
+    --text-secondary: #cccac0;
+    --text-tertiary: #aaa89d;
+    --text-muted: #aaa89d;
+    --text-success: #a7d6b0;
+    --text-error: #f3a29a;
+
+    --accent-primary: #c7d8ac;
+    --accent-hover: #d9e5c6;
+    --accent-light: rgba(199, 216, 172, 0.14);
+
+    /* 间距 */
+    --space-xs: 0.25rem;
+    --space-sm: 0.5rem;
+    --space-md: 0.75rem;
+    --space-lg: 1rem;
+    --space-xl: 1.5rem;
+    --space-2xl: 2rem;
+
+    /* 圆角 */
+    --radius-sm: 0.375rem;
+    --radius-md: 0.5rem;
+    --radius-lg: 0.5rem;
+    --radius-full: 999px;
+
+    /* 阴影 */
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
+
+    /* 过渡 */
+    --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-base: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* ========== Base Reset ========== */
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    font-family: var(--font-primary);
+    background: var(--surface-0);
+    color: var(--text-primary);
+    overflow: hidden;
+    padding: 24px 28px 16px;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    line-height: 1.6;
+  }
+
+  /* ========== Header ========== */
+  h1 {
+    flex-shrink: 0;
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0 0 var(--space-xs);
+    color: var(--text-primary);
+    letter-spacing: 0;
+  }
+
+  p.desc {
+    flex-shrink: 0;
+    font-size: 13px;
+    color: var(--text-tertiary);
+    margin: 0 0 20px;
+    line-height: 1.5;
+  }
+
+  /* ========== Scroll Container ========== */
+  .scroll {
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+    padding-right: var(--space-md);
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: #55554d transparent;
+    overflow-x: hidden;
+  }
+
+  /* ========== Group Sections ========== */
+  .group {
+    margin: 0 0 var(--space-2xl);
+  }
+
+  .group h2 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: 0;
+    border-bottom: 1px solid var(--surface-border);
+    padding-bottom: 10px;
+    margin: 28px 0 16px;
+  }
+
+  .group:first-child h2 {
+    margin-top: 0;
+  }
+
+  /* ========== Form Elements ========== */
+  label.field {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: var(--space-sm);
+    color: var(--text-primary);
+  }
+
+  input[type="password"],
+  input[type="text"],
+  input[type="number"],
+  textarea,
+  select {
+    width: 100%;
+    padding: 9px 12px;
+    min-height: 40px;
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-family: var(--font-primary);
+    color: var(--text-primary);
+    background: var(--surface-1);
+    outline: none;
+    margin-bottom: var(--space-lg);
+    transition: border-color var(--transition-base), box-shadow var(--transition-base), background var(--transition-base);
+  }
+
+  input[type="password"]:focus,
+  input[type="text"]:focus,
+  input[type="number"]:focus,
+  textarea:focus,
+  select:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px var(--accent-light);
+    background: var(--surface-2);
+  }
+
+  input[type="password"]:hover:not(:focus),
+  input[type="text"]:hover:not(:focus),
+  input[type="number"]:hover:not(:focus),
+  textarea:hover:not(:focus),
+  select:hover:not(:focus) {
+    border-color: var(--surface-border-focus);
+    background: var(--surface-hover);
+  }
+
+  textarea {
+    min-height: 4.5rem;
+    resize: vertical;
+    line-height: 1.5;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--text-tertiary);
+    opacity: 1;
+  }
+
+  input[readonly] {
+    color: var(--text-secondary);
+    background: var(--surface-0);
+  }
+
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: var(--radius-full);
+    background: var(--surface-border);
+    outline: none;
+    margin: var(--space-md) 0;
+    transition: background var(--transition-base);
+  }
+
+  input[type="range"]:hover {
+    background: var(--surface-border-focus);
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: background var(--transition-fast);
+  }
+
+  input[type="range"]::-webkit-slider-thumb:hover {
+    background: var(--accent-hover);
+  }
+
+  input[type="range"]::-webkit-slider-thumb:active {
+    background: var(--text-primary);
+  }
+
+  input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: background var(--transition-fast);
+  }
+
+  input[type="range"]::-moz-range-thumb:hover {
+    background: var(--accent-hover);
+  }
+
+  /* ========== Layout Helpers ========== */
+  .row2 {
+    display: flex;
+    gap: var(--space-lg);
+    align-items: center;
+    margin-bottom: var(--space-lg);
+    flex-wrap: wrap;
+  }
+
+  .row2 input[type="number"] {
+    width: 6rem;
+    flex-shrink: 0;
+    margin-bottom: 0;
+  }
+
+  .cache-pause-row button {
+    flex: 0 0 auto;
+  }
+
+  .cache-pause-row {
+    row-gap: var(--space-sm);
+    padding: 14px;
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-md);
+    background: var(--surface-1);
+    column-gap: 10px;
+    margin: 18px 0 8px;
+  }
+
+  .field-unit {
+    color: var(--text-secondary);
+    font-size: 13px;
+  }
+
+  /* ========== Checkbox & Radio ========== */
+  .check {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    align-items: start;
+    column-gap: 12px;
+    row-gap: 3px;
+    margin: 8px 0 12px;
+    cursor: pointer;
+    padding: 8px 0;
+    border-radius: var(--radius-md);
+    transition: background var(--transition-fast);
+  }
+
+  .check:hover {
+    background: var(--surface-hover);
+  }
+
+  .check input {
+    width: 1.125rem;
+    height: 1.125rem;
+    cursor: pointer;
+    flex: 0 0 auto;
+    margin-top: 0.125rem;
+    accent-color: var(--accent-primary);
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+
+  .check span {
+    grid-column: 2;
+    font-size: 14px;
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  .check .sub {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: 400;
+    margin-left: 0;
+    display: block;
+    margin-top: 0;
+  }
+
+  .radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-lg);
+  }
+
+  .radio {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text-secondary);
+    padding: var(--space-sm);
+    border-radius: var(--radius-md);
+    transition: background var(--transition-fast);
+  }
+
+  .radio:hover {
+    background: var(--surface-hover);
+  }
+
+  .radio input {
+    width: 1rem;
+    height: 1rem;
+    cursor: pointer;
+    accent-color: var(--accent-primary);
+  }
+
+  /* ========== Tips & Helper Text ========== */
+  .tip {
+    font-size: 13px;
+    color: var(--text-tertiary);
+    margin: calc(var(--space-sm) * -1) 0 var(--space-lg);
+    line-height: 1.6;
+  }
+
+  .tip b {
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+
+  /* ========== Buttons ========== */
+  button {
+    min-height: 38px;
+    padding: 8px 16px;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 600;
+    font-family: var(--font-primary);
+    cursor: pointer;
+    transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  }
+
+  #saveBtn,
+  #cacheResumeBtn {
+    background: var(--accent-primary);
+    color: var(--surface-0);
+    border: 1px solid var(--accent-primary);
+  }
+
+  #saveBtn:hover,
+  #cacheResumeBtn:hover:not(:disabled) {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+  }
+
+  #testBtn,
+  #pushTestBtn,
+  #cacheTestBtn,
+  #cachePauseBtn {
+    background: var(--surface-2);
+    color: var(--text-primary);
+    border: 1px solid var(--surface-border);
+  }
+
+  #testBtn:hover,
+  #pushTestBtn:hover,
+  #cacheTestBtn:hover,
+  #cachePauseBtn:hover:not(:disabled) {
+    background: var(--surface-hover);
+    border-color: var(--accent-primary);
+  }
+
+  #imageBtn {
+    background: var(--surface-2);
+    color: var(--text-primary);
+    border: 1px solid var(--surface-border);
+    padding: var(--space-sm) var(--space-lg);
+  }
+
+  #imageBtn:hover {
+    background: var(--surface-hover);
+    border-color: var(--accent-primary);
+  }
+
+  button:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 3px;
+  }
+
+  button:disabled {
+    color: var(--text-tertiary) !important;
+    background: var(--surface-1) !important;
+    border: 1px solid var(--surface-border) !important;
+    cursor: default;
+  }
+
+  button:active:not(:disabled) {
+    background: var(--surface-border);
+  }
+
+  ::selection {
+    color: var(--surface-0);
+    background: var(--accent-primary);
+  }
+
+  input,
+  textarea {
+    caret-color: var(--accent-primary);
+  }
+
+  .btns {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 10px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--surface-border);
+  }
+
+  #discardCloseBtn {
+    color: var(--text-error);
+    background: transparent;
+    border: 1px solid var(--surface-border);
+  }
+
+  #discardCloseBtn:hover:not(:disabled) {
+    background: rgba(243, 162, 154, 0.08);
+    border-color: var(--text-error);
+  }
+
+  /* ========== Status Messages ========== */
+  #status,
+  #cacheTestStatus,
+  #cachePauseStatus {
+    font-size: 13px;
+    margin-top: var(--space-lg);
+    min-height: 1.25rem;
+    line-height: 1.5;
+    word-break: break-word;
+  }
+
+  #status {
+    flex: 0 0 auto;
+    margin-top: 8px;
+  }
+
+  #cachePauseStatus {
+    margin-top: 0;
+  }
+
+  .ok {
+    color: var(--text-success);
+  }
+
+  .err {
+    color: var(--text-error);
+  }
+
+  .muted {
+    color: var(--text-muted);
+  }
+
+  /* ========== Accessibility ========== */
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* ========== Responsive ========== */
+  @media (max-width: 540px) {
+    body {
+      padding: 20px 20px 12px;
+    }
+
+    .cache-pause-row button {
+      flex: 1 1 auto;
+    }
+  }
+</style>
+</head>
+<body>
+  <h1>账号余额桌宠</h1>
+  <p class="desc">API Key 只保存在本机。所有功能均可随时开关。</p>
+
+  <div class="scroll">
+    <div class="group">
+      <h2>账户</h2>
+      <label class="field" for="siteTypeSelect">站点类型</label>
+      <select id="siteTypeSelect">
+        <option value="sub2api">Sub2API 中转站（余额走 /v1/usage）</option>
+        <option value="deepseek">DeepSeek 官方（余额走 /user/balance）</option>
+      </select>
+
+      <div id="sub2apiFields">
+        <label class="field" for="baseUrlInput">中转站地址</label>
+        <input type="text" id="baseUrlInput" placeholder="https://your-site.example" autocomplete="off" spellcheck="false" />
+        <div class="tip">填站点根地址（不带 /v1）。余额口径：Key 设额度→Key 额度剩余；设限速→限额剩余；都不设→钱包余额。统计窗口会标注。</div>
+        <label class="field" for="panelEmailInput">面板账号（可选，用于真实用量统计）</label>
+        <input type="text" id="panelEmailInput" placeholder="you@example.com" autocomplete="off" spellcheck="false" />
+        <label class="field" for="panelPasswordInput">面板密码</label>
+        <input type="password" id="panelPasswordInput" placeholder="面板登录密码" autocomplete="off" />
+        <div class="tip">填写后自动登录面板（JWT），「今日已用」和 24 小时统计将显示<b>账号级真实消耗</b>（实际扣除，跨全部 Key）；留空则用本地余额差值估算。密码仅保存在本机 config.json。</div>
+      </div>
+
+      <label class="field" for="keyInput">API Key</label>
+      <input type="password" id="keyInput" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+
+      <label class="field" for="labelInput">余额名称</label>
+      <input type="text" id="labelInput" placeholder="账号余额" autocomplete="off" spellcheck="false" />
+
+      <div id="deepseekFields">
+        <label class="field" for="urlInput">余额接口地址（DeepSeek 模式，可选）</label>
+        <input type="text" id="urlInput" placeholder="https://api.deepseek.com/user/balance" autocomplete="off" spellcheck="false" />
+        <div class="tip">官方 DeepSeek 留空即可；第三方兼容服务填它的余额接口地址。</div>
+      </div>
+
+      <label class="field" for="refreshInput">自动刷新间隔（秒）</label>
+      <input type="number" id="refreshInput" min="0" max="3600" step="1" placeholder="30" />
+      <div class="tip">每多少秒自动刷新余额，默认 30；填 0 关闭自动刷新。每次刷新都会计入 24 小时统计采样。</div>
+    </div>
+
+    <div class="group">
+      <h2>提醒与统计</h2>
+      <label class="check">
+        <input type="checkbox" id="dailySpendAlertInput" checked />
+        <span>今日消费节点提醒</span>
+        <span class="sub">累计消费每跨过一个阈值，再跳动并发声</span>
+      </label>
+      <div class="row2">
+        <label class="field" for="dailySpendStepInput" style="margin:0;">每消费</label>
+        <input type="number" id="dailySpendStepInput" min="0.01" max="100000" step="0.01" value="10" />
+      </div>
+      <div class="tip">默认每 10 个账户货币单位提醒一次（10、20、30…），金额单位与「今日已用」一致，不换算汇率。仅使用账号登录后的实际消费；需开启记录今日消耗。启动或改阈值不补报旧节点，同一节点不重复提醒。一次刷新跨多个节点时只提醒一次。</div>
+      <label class="check">
+        <input type="checkbox" id="cacheMonitorInput" checked />
+        <span>1 分钟缓存率告警</span>
+        <span class="sub">每分钟读取 CC Switch 最近 60 秒数据，低于 80% 时提醒</span>
+      </label>
+      <div class="row2">
+        <label class="field" for="cacheMonitorThresholdInput" style="margin:0;">缓存率低于</label>
+        <input type="number" id="cacheMonitorThresholdInput" value="80" readonly aria-label="固定告警阈值 80%" />
+        <span class="field-unit">% 时提醒</span>
+      </div>
+      <label class="check">
+        <input type="checkbox" id="cacheAlertSoundInput" checked />
+        <span>缓存告警声音</span>
+        <span class="sub">Windows 通知带提示音，与消费节点声音独立</span>
+      </label>
+      <div class="tip">缓存告警通过 Windows 通知显示缓存率、阈值、取样时间、请求数，以及缓存读取、写入、未缓存和总输入 Token。点击通知可打开统计页。</div>
+      <div class="tip">开启后，每分钟检查本机 Codex 代理最近 60 秒的缓存率；低于 80% 时发送 Windows 通知，持续偏低每分钟提醒一次，同一检查分钟不重复通知。缓存率按有效输入 Token 加权，失败请求及未知或异常口径计入排除数；无有效用量或样本口径不完整时不告警。统计页另显示最近 1 小时数据，JWT 账号历史统计保持独立。</div>
+      <div class="row2 cache-pause-row" aria-label="缓存统计读取暂停">
+        <label class="field" for="cachePauseHoursInput" style="margin:0;">暂停读取</label>
+        <input type="number" id="cachePauseHoursInput" min="1" max="168" step="1" value="1" aria-label="暂停 CC Switch 统计读取小时数" />
+        <span class="field-unit">小时</span>
+        <button id="cachePauseBtn" type="button">暂停 CC Switch</button>
+        <button id="cacheResumeBtn" type="button" disabled>立即恢复</button>
+      </div>
+      <div id="cachePauseStatus" class="tip" role="status" aria-live="polite">当前未暂停 CC Switch 统计读取。</div>
+      <button id="cacheTestBtn" type="button">测试缓存告警</button>
+      <div id="cacheTestStatus" class="tip" role="status" aria-live="polite">发送一条 60% 演示通知，检查 Windows 提示及声音，不改变真实统计。</div>
+      <label class="check">
+        <input type="checkbox" id="bounceInput" checked />
+        <span>消费节点跳动</span>
+        <span class="sub">达到消费节点时桌宠跳一下</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="soundInput" checked />
+        <span>消费节点声音</span>
+        <span class="sub">达到消费节点时播放轻提示音，日常扣费静音</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="lowAlertInput" checked />
+        <span>低余额提醒</span>
+        <span class="sub">余额低于阈值时弹通知</span>
+      </label>
+      <div class="row2">
+        <label class="field" for="lowThresholdInput" style="margin:0;">阈值</label>
+        <input type="number" id="lowThresholdInput" min="0" step="1" value="5" />
+      </div>
+      <div class="tip" style="margin-top:2px;">余额低于这个数值（默认 ¥5）时提醒。</div>
+
+      <label class="check">
+        <input type="checkbox" id="trackStatsInput" checked />
+        <span>记录今日消耗</span>
+        <span class="sub">桌宠显示今日已用，统计页显示用量与缓存</span>
+      </label>
+    </div>
+
+    <div class="group">
+      <h2>外观与体验</h2>
+      <div class="row2" style="margin-bottom:4px;">
+        <label class="field" for="scaleInput" style="margin:0;">大小</label>
+        <span id="scaleVal" class="field-unit">100%</span>
+      </div>
+      <input type="range" id="scaleInput" min="60" max="140" step="10" style="width:100%;padding:0;" />
+      <div class="tip" style="margin-top:0;">拖动即时生效（60%–140%）。桌宠上的 +/- 按钮已移除，统一在这里调节。</div>
+
+      <label class="check">
+        <input type="checkbox" id="lockInput" checked />
+        <span>锁定位置（融入桌面）</span>
+        <span class="sub">锁定后桌宠不可拖动、不响应误触；取消勾选即可拖动摆放</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="manualHideInput" disabled />
+        <span>手动隐身</span>
+        <span class="sub">勾选立即隐藏，取消恢复；也可 Ctrl+Shift+H 或单击托盘恢复</span>
+      </label>
+      <div class="tip" id="visibilityStatus">正在读取显示状态…</div>
+      <label class="check">
+        <input type="checkbox" id="fsHideInput" checked />
+        <span>全屏时自动隐身</span>
+        <span class="sub">有应用全屏/无边框全屏时隐藏桌宠，退出全屏自动恢复</span>
+      </label>
+
+      <label class="check">
+        <input type="checkbox" id="showTimeInput" />
+        <span>显示时间</span>
+        <span class="sub">气泡里显示当前时间（默认关，气泡只显示余额+今日已用）</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="idleInput" checked />
+        <span>离开鼠标后变淡</span>
+        <span class="sub">鼠标移入亮起，停留时保持高亮，移开立即变淡</span>
+      </label>
+      <div class="row2" hidden style="display:none;">
+        <label class="field" for="idleSecInput" style="margin:0;">闲置秒数</label>
+        <input type="number" id="idleSecInput" min="1" max="300" step="1" value="5" />
+      </div>
+      <div class="tip" style="margin-top:2px;">取消勾选后始终保持亮度。</div>
+
+      <label class="check">
+        <input type="checkbox" id="quotesInput" checked />
+        <span>随机语录</span>
+        <span class="sub">偶尔在气泡里冒一句（内置 20 条，自定义后优先用自定义）</span>
+      </label>
+      <textarea id="quotesTextInput" placeholder="留空使用内置 20 条；自定义时每行或分号分隔一条，例如：&#10;加油，余额还够用~&#10;记得充值哦；今天也要开心" spellcheck="false"></textarea>
+    </div>
+
+    <div class="group">
+      <h2>外观定制</h2>
+      <label class="check">
+        <input type="checkbox" id="customImageInput" />
+        <span>使用自定义图片</span>
+      </label>
+      <button id="imageBtn" type="button">选择桌宠图片…</button>
+      <div class="tip">建议使用正方形透明 PNG，人物放在中下方，人物面前留出气泡空间。</div>
+    </div>
+
+    <div class="group">
+      <h2>远程推送（预留）</h2>
+      <label class="check">
+        <input type="checkbox" id="pushEnabledInput" />
+        <span>启用 Webhook 推送</span>
+        <span class="sub">事件发生时 POST JSON 到下方地址</span>
+      </label>
+      <input type="text" id="pushUrlInput" placeholder="https://...（Bark / Server酱 / 企业微信机器人 / 自建 Webhook）" autocomplete="off" spellcheck="false" />
+      <div class="tip">推送内容：{ event, balance, currency, usedToday, requestsToday, ts }。当前触发事件：低余额提醒、手动测试。功能为预留接口，后续可扩展更多事件。</div>
+      <button id="pushTestBtn" type="button">发送测试推送</button>
+    </div>
+
+    <div class="group">
+      <h2>系统</h2>
+      <label class="check">
+        <input type="checkbox" id="autoStartInput" />
+        <span>开机自启</span>
+        <span class="sub">随系统登录自动启动</span>
+      </label>
+      <div class="tip" id="autoStartStatus">正在核对开机自启状态…</div>
+      <label class="check">
+        <input type="checkbox" id="hotkeyInput" checked />
+        <span>全局热键</span>
+        <span class="sub">Ctrl+Shift+R 立即刷新</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="alwaysTopInput" checked />
+        <span>始终置顶</span>
+        <span class="sub">桌宠悬浮在其它窗口之上</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="snapInput" checked />
+        <span>自动吸附屏幕边缘</span>
+      </label>
+      <div class="tip" style="margin-top:2px;">桌宠固定为「仅托盘」常驻：不占任务栏，右键托盘打开统计/设置；右键桌宠临时隐藏 10 秒。</div>
+    </div>
+  </div>
+
+  <div class="btns">
+    <button id="saveBtn">保存</button>
+    <button id="testBtn">保存并测试</button>
+    <button id="discardCloseBtn" type="button" hidden disabled>放弃更改并关闭</button>
+  </div>
+  <div id="status"></div>
+  <script src="settings.js"></script>
+</body>
+</html>
