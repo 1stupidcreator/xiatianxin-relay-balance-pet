@@ -394,23 +394,26 @@ function updateDailySpendNotice(c, sourceId, allowAlert = true) {
       step, currency: stats.currency, sound: c.sound !== false, bounceAnim: c.bounceAnim !== false,
     })
   }
+  return true // 提醒去重与本轮统计已经一起保存。
 }
 
-function recordBalance(nb) {
+function recordBalance(nb, persist = true) {
   if (typeof nb !== 'number' || !isFinite(nb)) return
   ensureStats()
   if (!panelAuthConfigured() && stats.lastBalance !== null && nb < stats.lastBalance) {
-    stats.todayUsed = Math.round((stats.todayUsed + (stats.lastBalance - nb)) * 100) / 100
+    const used = (Number(stats.todayUsed) || 0) + (stats.lastBalance - nb)
+    stats.todayUsed = loadConfig().siteType === 'deepseek' ? Math.round(used * 100) / 100 : used
   }
   stats.lastBalance = nb
-  saveStats()
+  if (persist) saveStats()
 }
 
 // ---------------------------------------------------------------------------
 // 本机余额采样只补充余额曲线；账号消费和缓存数据直接从 JWT 接口读取。
 // 最长查看 144 小时，多留一小时作为余额差值的前一个采样点。
 // ---------------------------------------------------------------------------
-const USAGE_HISTORY_MAX_POINTS = 18000
+const USAGE_HISTORY_RAW_MS = 60 * 60 * 1000
+let usageHistoryCompactedMinute = -1
 let usageHistory = []
 let usageHistoryLoaded = false
 
@@ -435,9 +438,30 @@ function appendUsageSample(extra) {
   const now = Date.now()
   const cutoff = now - 145 * 60 * 60 * 1000
   const samples = loadUsageHistory()
-  while (samples.length && samples[0].t < cutoff) samples.shift()
-  samples.push({ t: now, ...(extra || {}) })
-  while (samples.length > USAGE_HISTORY_MAX_POINTS) samples.shift()
+  const previous = samples[samples.length - 1]
+  const remaining = extra && extra.remaining
+  const estimatedConsumed = previous && Number.isFinite(previous.remaining) && Number.isFinite(remaining)
+    ? Math.max(0, previous.remaining - remaining) : 0
+  samples.push({ t: now, ...(extra || {}), estimatedConsumed })
+  const minute = Math.floor(now / 60000)
+  if (usageHistoryCompactedMinute !== minute) {
+    // 最近一小时保留原采样，较早的记录按分钟合并；累计扣费保留充值前后的所有下降。
+    const compacted = []
+    let prev = null
+    for (const sample of samples) {
+      const consumed = Number.isFinite(sample.estimatedConsumed) ? sample.estimatedConsumed
+        : prev && Number.isFinite(prev.remaining) && Number.isFinite(sample.remaining)
+          ? Math.max(0, prev.remaining - sample.remaining) : 0
+      prev = sample
+      if (sample.t < cutoff) continue
+      const last = compacted[compacted.length - 1]
+      if (sample.t < now - USAGE_HISTORY_RAW_MS && last && Math.floor(last.t / 60000) === Math.floor(sample.t / 60000)) {
+        compacted[compacted.length - 1] = { ...sample, estimatedConsumed: last.estimatedConsumed + consumed }
+      } else compacted.push({ ...sample, estimatedConsumed: consumed })
+    }
+    usageHistory = compacted
+    usageHistoryCompactedMinute = minute
+  }
   saveUsageHistory()
 }
 
@@ -1089,6 +1113,7 @@ async function fetchBalance() {
       ensureStats()
       // 面板登录态：拉账号级真实今日消耗（actual_cost=实际扣除，跨全部 Key）
       if (panelAuthConfigured()) {
+        payload.accountConfigured = true
         try {
           const acc = await getAccountTodayStats()
           const actual = pickNum(acc && acc.today_actual_cost)
@@ -1107,7 +1132,7 @@ async function fetchBalance() {
       if (sourceId !== dataSourceIdentity(loadConfig())) return { ok: false, code: 'CONFIG_CHANGED', error: '配置已变更，请重新刷新', transient: true }
       // 消耗统计
       if (cfgNow.trackStats) {
-        recordBalance(Number(payload.totalBalance))
+        recordBalance(Number(payload.totalBalance), cfgNow.siteType === 'deepseek')
         // 今日消耗：登录态用账号级真实值（actual_cost=实际扣除）；未登录回退本地余额差值累计
         // （接口 /v1/usage 的 usage.today 是"这把 Key 自己"的用量，钱包模式下恒 0，不能直接用）
         if (cfgNow.siteType !== 'deepseek') {
@@ -1125,8 +1150,7 @@ async function fetchBalance() {
             stats.todaySource = 'estimated'
             stats.todayStale = false
           }
-          saveStats()
-          updateDailySpendNotice(cfgNow, sourceId)
+          if (!updateDailySpendNotice(cfgNow, sourceId)) saveStats()
           // 24h 采样：仅 Sub2API 模式（接口一次带回全部统计）
           appendUsageSample({
             remaining: payload.totalBalance,
@@ -1680,6 +1704,7 @@ async function getUsageWindow(hours = 24) {
     samples,
     todayUsed: stats.todayUsed,
     todayKey: stats.today,
+    accountUpdatedAt: stats.accountUpdatedAt || 0,
     todaySource: stats.todaySource,
     todayStale: stats.todayStale,
     accountAuth,

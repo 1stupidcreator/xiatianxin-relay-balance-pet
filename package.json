@@ -1,6 +1,6 @@
 {
   "name": "relay-balance-pet",
-  "version": "1.1.17",
+  "version": "1.1.18",
   "description": "Windows 账号余额桌宠，支持 Sub2API / DeepSeek 余额、JWT 使用统计与 CC Switch 本机缓存率提醒。",
   "main": "main.js",
   "scripts": {

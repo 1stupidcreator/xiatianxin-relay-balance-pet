@@ -394,10 +394,11 @@ function render() {
 
 function renderTodayHint() {
   var text = todayLine(), amount = text.slice('今日已用 '.length)
-  if (hintEl.textContent === text && hintEl.querySelector('.dshp-today-value')) return
+  var label = lastKnownTodayStale ? '今日待同步' : '今日已用'
+  if (hintEl.textContent === label + ' ' + amount && hintEl.querySelector('.dshp-today-value')) return
   var caption = document.createElement('span'), value = document.createElement('span')
   caption.className = 'dshp-today-label'
-  caption.textContent = '今日已用'
+  caption.textContent = label
   value.className = 'dshp-today-value'
   value.textContent = amount
   hintEl.replaceChildren(caption, document.createTextNode(' '), value)
@@ -411,13 +412,16 @@ function todayLine() {
 }
 
 var lastKnownTodayUsed = null
+var lastKnownTodayStale = false
 function updateTodayUsedFromStats() {
   window.pet.getStats().then(function (st) {
     lastKnownTodayUsed = st && typeof st.todayUsed === 'number' ? st.todayUsed : null
+    lastKnownTodayStale = !!(st && (st.todayStale || st.todaySource === 'pending'))
     hintEl.title = st && st.todaySource === 'pending' ? '账号统计尚未同步，请检查设置中的面板账号'
       : (st && st.todayStale ? '账号统计暂时无法更新，保留上次已同步数据'
       : (st && st.todaySource === 'account' ? '账号今日实际扣除金额（包含全部 Key）' : '根据本地余额变化估算')
       )
+    if (st && st.accountUpdatedAt) hintEl.title += '；上次同步 ' + new Date(st.accountUpdatedAt).toLocaleString('zh-CN', { hour12: false })
     if (state.status === 'ok') render()
   })
 }

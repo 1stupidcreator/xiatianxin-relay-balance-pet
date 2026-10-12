@@ -396,7 +396,12 @@ testBtn.addEventListener('click', async function () {
   show('正在测试…', 'muted')
   var b = await window.pet.getBalance()
   if (b && b.ok) {
-    show('✅ 连接成功，当前余额：' + (b.currency === 'CNY' ? '¥ ' : '') + Number(b.totalBalance).toFixed(2) + (b.currency !== 'CNY' && b.currency ? ' ' + b.currency : ''), 'ok')
+    var balanceText = '余额接口正常：' + (b.currency === 'CNY' ? '¥ ' : '') + Number(b.totalBalance).toFixed(2) + (b.currency !== 'CNY' && b.currency ? ' ' + b.currency : '')
+    if (b.stale) show('余额接口暂时不可用，当前显示缓存数据，请稍后重试。', 'err')
+    else if (siteTypeSelect.value === 'sub2api') {
+      if (b.accountConfigured && !b.accountAuth) show(balanceText + '；面板账号未同步，今日已用尚未验证，请检查账号密码或稍后重试。', 'err')
+      else show(balanceText + (b.accountAuth ? '；面板账号正常，今日已用已同步。' : '；未配置面板登录，今日已用为本机估算。'), 'ok')
+    } else show('✅ 连接成功，' + balanceText, 'ok')
   } else {
     show('❌ ' + ((b && b.error) || '测试失败'), 'err')
   }

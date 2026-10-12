@@ -150,7 +150,11 @@ function buildBuckets(samples, accountTrend, hours, range) {
   for (var i = 0; i < samples.length; i++) {
     var s = samples[i]; if (!s || !Number.isFinite(s.t) || !Number.isFinite(s.remaining) || s.t > now) continue
     var key = Math.floor(s.t / 3600000)
-    if (previous && s.t >= start && s.remaining < previous.remaining) estimatedByHour[key] = (estimatedByHour[key] || 0) + previous.remaining - s.remaining
+    if (s.t >= start) {
+      var consumed = Number.isFinite(s.estimatedConsumed) ? s.estimatedConsumed
+        : previous && s.remaining < previous.remaining ? previous.remaining - s.remaining : 0
+      estimatedByHour[key] = (estimatedByHour[key] || 0) + consumed
+    }
     previous = s
     if (s.t >= start) byHour[key] = s
   }
@@ -197,6 +201,7 @@ function draw() {
     var estimate = buckets.reduce(function (sum, b) { return sum + b.consumed }, 0)
     cUsed.textContent = summary ? sym + fmtNum(summary.actualCost) : (data.accountConfigured ? '--' : sym + fmtNum(estimate))
     cToday.textContent = typeof data.todayUsed === 'number' ? sym + fmtNum(data.todayUsed) + (data.todayStale ? ' *' : '') : '--'
+    cToday.title = (data.todayStale ? '待同步，保留上次金额。' : '') + (data.accountUpdatedAt ? '上次账号同步：' + new Date(data.accountUpdatedAt).toLocaleString('zh-CN', { hour12: false }) : '')
     cCacheRate.textContent = summary ? pct(summary.cacheRate) : '--'
     var cacheAvailable = summary && summary.cacheAvailable
     cCacheTokens.textContent = cacheAvailable ? fmtTokens(summary.cacheReadTokens) : '--'
