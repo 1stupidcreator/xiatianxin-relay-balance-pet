@@ -435,6 +435,7 @@ function updateTodayUsedFromStats() {
 // ---------------------------------------------------------------------------
 var dragFrameId = null
 var lockedTap = null   // 锁定态下记录按下位置，用于区分"轻点刷新"与"想拖动"
+var lastPetClickAllowed = false
 function scheduleExpress() {
   if (dragFrameId) return
   dragFrameId = requestAnimationFrame(function () {
@@ -444,6 +445,7 @@ function scheduleExpress() {
 }
 
 function onPointerDown(e) {
+  lastPetClickAllowed = false
   if (e.button !== 0) return
   if (state.locked) {
     // 锁定（融入桌面）：不允许拖动；轻点仍刷新
@@ -535,13 +537,21 @@ root.addEventListener('pointermove', onPointerMove)
 root.addEventListener('pointerup', function (e) {
   if (e.button !== 0) return
   if (state.locked) {
+    lastPetClickAllowed = !!(lockedTap && !lockedTap.moved)
     if (lockedTap && !lockedTap.moved) refresh(true)
     lockedTap = null
     return
   }
+  lastPetClickAllowed = !!(drag && drag.active && !drag.moved)
   endDrag(e, true)
 })
-root.addEventListener('pointercancel', function (e) { lockedTap = null; endDrag(e, false) })
+root.addEventListener('pointercancel', function (e) { lastPetClickAllowed = false; lockedTap = null; endDrag(e, false) })
+root.addEventListener('dblclick', function (e) {
+  if (e.button !== 0 || !lastPetClickAllowed) return
+  lastPetClickAllowed = false
+  e.preventDefault()
+  window.pet.openStats()
+})
 window.addEventListener('resize', function () {
   window.pet.getGeometry().then(function (geometry) {
     applyGeometry(geometry)
@@ -610,6 +620,7 @@ function updateMirror() {
 // 右键临时隐身：菜单功能统一从托盘进入
 // ---------------------------------------------------------------------------
 function cancelPetInteraction() {
+  lastPetClickAllowed = false
   lockedTap = null
   if (drag) {
     drag.active = false
