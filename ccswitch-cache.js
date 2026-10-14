@@ -121,7 +121,7 @@ function readableError(error) {
   return '无法读取 CC Switch 本地统计，请检查数据库状态与版本'
 }
 
-function readLocalCacheStats(dbPath, now = Date.now()) {
+function readLocalCacheStats(dbPath, now = Date.now(), options = {}) {
   const result = {
     status: 'error', source: SOURCE, sampledAt: now,
     latestRequestAt: null, error: '',
@@ -153,24 +153,48 @@ function readLocalCacheStats(dbPath, now = Date.now()) {
     // compared with millisecond-derived boundaries without rounding, yielding
     // (start, end] and excluding future rows even with a fractional end second.
     database.exec('BEGIN')
+    const modelFilter = options.gptOnly ? " AND typeof(model) = 'text' AND (lower(trim(model)) = 'gpt' OR lower(trim(model)) LIKE 'gpt-%')" : ''
+    if (options.gptOnly && !columns.has('model')) throw publicError('CC Switch 数据缺少 model，无法筛选 GPT 模型')
     const latestStatement = database.prepare(`
       SELECT MAX(created_at) AS latest FROM proxy_request_logs
       WHERE app_type = 'codex' AND data_source = 'proxy'
-        AND typeof(created_at) = 'integer' AND created_at <= ?`)
+        AND typeof(created_at) = 'integer' AND created_at <= ?${modelFilter}`)
     latestStatement.setReadBigInts(true)
     const latest = latestStatement.get(now / 1000).latest
 
-    const statement = database.prepare(WINDOWS_SQL)
+    const groups = Array.isArray(options.accounts) ? options.accounts : []
+    if (groups.length && !columns.has('provider_id')) throw publicError('CC Switch 数据缺少 provider_id，无法区分账号')
+    const groupedSql = WINDOWS_SQL.replace('SELECT created_at,', 'SELECT provider_id, created_at,')
+      .replace('SELECT name,', 'SELECT provider_id, name,').replace('GROUP BY name', 'GROUP BY provider_id, name')
+    const query = (groups.length ? groupedSql : WINDOWS_SQL).replace("WHERE app_type = 'codex' AND data_source = 'proxy'", "WHERE app_type = 'codex' AND data_source = 'proxy'" + modelFilter)
+    const statement = database.prepare(query)
     statement.setReadBigInts(true)
     const rows = statement.all((now - 3600000) / 1000, now / 1000, (now - 60000) / 1000)
     database.exec('COMMIT')
 
     result.minute.complete = true
     result.hour.complete = true
-    for (const row of rows) {
+    const aggregate = list => list.reduce((sum, row) => {
+      for (const key of Object.keys(row)) if (typeof row[key] === 'bigint') sum[key] = (sum[key] || 0n) + row[key]
+      return sum
+    }, {})
+    if (groups.length) {
+      result.accountWindows = {}
+      for (const group of groups) {
+        const ids = new Set(group.providerIds || [])
+        const entry = { status: ids.size ? 'ok' : 'unconfigured', minute: emptyWindow(now, 60000, true), hour: emptyWindow(now, 3600000, true) }
+        for (const name of ['minute', 'hour']) {
+          const matches = rows.filter(row => row.name === name && ids.has(row.provider_id))
+          if (matches.length) entry[name] = applyWindow(entry[name], aggregate(matches))
+        }
+        result.accountWindows[group.id] = entry
+      }
+    }
+    for (const row of groups.length ? ['minute', 'hour'].map(name => ({ name, ...aggregate(rows.filter(row => row.name === name)) })).filter(row => row.requests !== undefined) : rows) {
       if (row.name === 'minute') result.minute = applyWindow(result.minute, row)
       else if (row.name === 'hour') result.hour = applyWindow(result.hour, row)
     }
+    result.modelScope = options.gptOnly ? 'GPT' : 'all'
     result.latestRequestAt = latest === null ? null : safeInteger(latest) * 1000
     if (result.latestRequestAt !== null && !Number.isSafeInteger(result.latestRequestAt)) {
       throw publicError('CC Switch 本地统计时间超出可安全读取的范围')
@@ -191,4 +215,19 @@ function readLocalCacheStats(dbPath, now = Date.now()) {
   }
 }
 
-module.exports = { readLocalCacheStats }
+function listCacheProviders(dbPath) {
+  let database
+  try {
+    const { DatabaseSync } = require('node:sqlite')
+    database = new DatabaseSync(dbPath, { readOnly: true, allowExtension: false })
+    database.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=200')
+    return database.prepare("SELECT id, name, settings_config FROM providers WHERE app_type = 'codex' ORDER BY name").all().map(row => {
+      let key = ''
+      try { key = JSON.parse(row.settings_config).auth?.OPENAI_API_KEY || '' } catch {}
+      return { id: row.id, name: row.name, key }
+    })
+  } catch { return [] }
+  finally { if (database) database.close() }
+}
+
+module.exports = { readLocalCacheStats, listCacheProviders }

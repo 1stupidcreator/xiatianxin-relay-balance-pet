@@ -3,7 +3,7 @@
 // 预留远程推送（Webhook，默认关闭）。原 DeepSeek 模式与全部原有功能保留。
 'use strict'
 
-const { app, BrowserWindow, ipcMain, screen, nativeImage, Tray, Menu, Notification, dialog, globalShortcut } = require('electron')
+const { app, BrowserWindow, ipcMain, screen, nativeImage, Tray, Menu, Notification, dialog, globalShortcut, safeStorage } = require('electron')
 
 // 允许 Web Audio 无需用户手势即可播放（余额刷新是后台动作）
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
@@ -13,7 +13,7 @@ const fs = require('node:fs')
 const { spawn } = require('node:child_process')
 const { createHash } = require('node:crypto')
 const { capturePlacement, placeWindow } = require('./window-placement')
-const { readLocalCacheStats } = require('./ccswitch-cache')
+const { readLocalCacheStats, listCacheProviders } = require('./ccswitch-cache')
 
 // 自检使用独立配置与离线响应，不覆盖常驻实例的设置、自启或凭据。
 const SELF_TEST_MODE = process.argv.some((arg) => ['--smoke-test', '--fs-smoke-test', '--jwt-smoke-test'].includes(arg))
@@ -108,19 +108,35 @@ function defaultConfig() {
   }
 }
 
+const ACCOUNT_FIELDS = ['siteType', 'baseUrl', 'balanceUrl', 'apiKey', 'panelEmail', 'panelPassword', 'cacheProviderIds']
+function accountProfile(c, id = 'default') {
+  return { id, name: c.accountName || '账号 1', ...Object.fromEntries(ACCOUNT_FIELDS.map(key => [key, c[key] ?? (key === 'cacheProviderIds' ? [] : '')])) }
+}
+
+function normalizeAccounts(c) {
+  const accounts = Array.isArray(c.accounts) && c.accounts.length ? c.accounts : [accountProfile(c)]
+  const active = accounts.find(a => a.id === c.activeAccountId) || accounts[0]
+  return { ...c, ...Object.fromEntries(ACCOUNT_FIELDS.map(key => [key, active[key] ?? (key === 'cacheProviderIds' ? [] : '')])),
+    accounts, activeAccountId: active.id, accountName: active.name || '账号' }
+}
+
 function loadConfig() {
   try {
     const c = JSON.parse(fs.readFileSync(configPath(), 'utf8'))
     // 仅迁移旧默认名称，保留用户自定义的余额名称；读取不改写配置文件。
     if (c.label === '中转余额') c.label = '账号余额'
-    return { ...defaultConfig(), ...c }
+    return normalizeAccounts({ ...defaultConfig(), ...c })
   } catch {
-    return defaultConfig()
+    return normalizeAccounts(defaultConfig())
   }
 }
 
 function saveConfig(patch) {
-  const next = { ...loadConfig(), ...patch }
+  const cur = loadConfig()
+  const merged = { ...cur, ...patch }
+  if (!patch.accounts) merged.accounts = cur.accounts.map(a => a.id === cur.activeAccountId
+    ? { ...a, ...Object.fromEntries(ACCOUNT_FIELDS.map(key => [key, merged[key]])), name: merged.accountName } : a)
+  const next = normalizeAccounts(merged)
   const temp = configPath() + '.tmp'
   try {
     fs.mkdirSync(path.dirname(configPath()), { recursive: true })
@@ -144,6 +160,21 @@ let settingsWin = null
 let tray = null
 let balanceCache = null
 let balanceInFlight = null
+let accountRevision = 0
+const accountSessions = new Map()
+
+function accountList() {
+  const c = loadConfig()
+  return { activeAccountId: c.activeAccountId, accounts: c.accounts.map(a => ({ id: a.id, name: a.name,
+    siteType: a.siteType, baseUrl: a.baseUrl, configured: !!(a.panelEmail && a.panelPassword),
+    cacheProviderIds: Array.isArray(a.cacheProviderIds) ? a.cacheProviderIds : [] })) }
+}
+
+function broadcastAccounts(extra = {}) {
+  for (const win of [petWin, statsWin, settingsWin]) {
+    if (win && !win.isDestroyed()) win.webContents.send('pet:accounts-updated', { ...accountList(), ...extra })
+  }
+}
 let posSaveTimer = null
 let balanceFetchCount = 0
 let stats = { today: '', todayUsed: 0, lastBalance: null, currency: null, todaySource: 'estimated', todayStale: false }
@@ -189,7 +220,7 @@ function cacheMonitorTimezone() {
 }
 
 function cacheMonitorSource(c = loadConfig()) {
-  return fingerprint(['ccswitch-minute-codex-proxy-v1', ccSwitchDatabasePath()])
+  return fingerprint(['ccswitch-minute-codex-proxy-gpt-v2', ccSwitchDatabasePath()])
 }
 
 function ccSwitchDatabasePath() {
@@ -239,7 +270,9 @@ async function getLocalCacheStats(options = {}) {
   const request = Promise.resolve().then(() => {
       const until = cacheStatsPauseUntil()
       if (until) return emptyPausedCacheStats(Date.now(), until)
-      return readLocalCacheStats(ccSwitchDatabasePath(), Date.now())
+      const c = loadConfig()
+      return readLocalCacheStats(ccSwitchDatabasePath(), Date.now(), { gptOnly: true,
+        ...(c.accounts.length > 1 ? { accounts: c.accounts.map(a => ({ id: a.id, providerIds: a.cacheProviderIds || [] })) } : {}) })
     })
     .then(value => {
       const until = cacheStatsPauseUntil()
@@ -290,7 +323,9 @@ function cacheMonitorThreshold(c = loadConfig()) {
 
 function cacheMonitorPublic() {
   const c = loadConfig()
-  const m = loadCacheMonitor()
+  const stored = loadCacheMonitor()
+  const m = c.accounts.length > 1 ? { ...stored, ...(stored.accountAlerts && stored.accountAlerts[c.activeAccountId]
+    || { status: (c.cacheProviderIds || []).length ? 'pending' : 'unconfigured', rate: null, checkedAt: 0 }) } : stored
   const pausedUntil = cacheStatsPauseUntil(c)
   const enabled = c.cacheMonitorEnabled !== false
   const configured = pausedUntil ? true : fs.existsSync(ccSwitchDatabasePath())
@@ -312,6 +347,9 @@ function cacheMonitorPublic() {
     inputTokens: m.inputTokens || 0, cacheReadTokens: m.cacheReadTokens || 0,
     cacheCreationTokens: m.cacheCreationTokens || 0, uncachedInputTokens: m.uncachedInputTokens || 0, alertActive: !!m.alertActive,
     lastAlertAt: m.lastAlertAt || 0, error: m.error || '',
+    accounts: c.accounts.length > 1 ? c.accounts.map(a => ({ accountId: a.id, name: a.name,
+      ...(m.accountAlerts && m.accountAlerts[a.id] || { status: (a.cacheProviderIds || []).length ? 'pending' : 'unconfigured', rate: null }),
+      status: pausedUntil ? 'paused' : !enabled ? 'disabled' : (m.accountAlerts && m.accountAlerts[a.id] || {}).status || ((a.cacheProviderIds || []).length ? 'pending' : 'unconfigured') })) : [],
   }
 }
 
@@ -506,6 +544,121 @@ const PANEL_BASE = () => panelBaseFor(loadConfig())
 const fingerprint = (values) => createHash('sha256').update(JSON.stringify(values)).digest('hex')
 const accountIdentity = (c) => fingerprint([c.siteType, panelBaseFor(c), c.panelEmail || '', c.panelPassword || ''])
 const dataSourceIdentity = (c) => fingerprint([c.siteType, panelBaseFor(c), c.balanceUrl || '', c.apiKey || '', c.panelEmail || ''])
+const webLoginWindows = new Map()
+const sessionPath = () => path.join(app.getPath('userData'), 'account-sessions.json')
+
+function storedAccountSession(c) {
+  const identity = accountIdentity(c)
+  if (accountSessions.has(identity)) return accountSessions.get(identity)
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return null
+    const saved = JSON.parse(fs.readFileSync(sessionPath(), 'utf8'))
+    if (!saved[identity]) return null
+    const session = JSON.parse(safeStorage.decryptString(Buffer.from(saved[identity], 'base64')))
+    accountSessions.set(identity, session)
+    return session
+  } catch { return null }
+}
+
+function persistAccountSession(c, session) {
+  accountSessions.set(accountIdentity(c), session)
+  if (!safeStorage.isEncryptionAvailable()) return
+  let saved = {}
+  try { saved = JSON.parse(fs.readFileSync(sessionPath(), 'utf8')) } catch {}
+  saved[accountIdentity(c)] = safeStorage.encryptString(JSON.stringify(session)).toString('base64')
+  fs.mkdirSync(path.dirname(sessionPath()), { recursive: true })
+  fs.writeFileSync(sessionPath() + '.tmp', JSON.stringify(saved), 'utf8')
+  fs.renameSync(sessionPath() + '.tmp', sessionPath())
+}
+
+function invalidateAccountSession(c) {
+  accountSessions.delete(accountIdentity(c))
+  try {
+    const saved = JSON.parse(fs.readFileSync(sessionPath(), 'utf8'))
+    delete saved[accountIdentity(c)]
+    fs.writeFileSync(sessionPath() + '.tmp', JSON.stringify(saved), 'utf8')
+    fs.renameSync(sessionPath() + '.tmp', sessionPath())
+  } catch {}
+}
+
+async function acceptWebLogin(accountId, data, credentials) {
+  const c = loadConfig(), profile = c.accounts.find(a => a.id === accountId)
+  if (!profile || !data || !data.access_token) return false
+  const candidate = { ...profile, ...credentials }
+  if (candidate.panelEmail !== profile.panelEmail) return false
+  const res = await fetch(panelBaseFor(profile) + '/api/v1/auth/me', { headers: { Authorization: 'Bearer ' + data.access_token }, signal: AbortSignal.timeout(20000) })
+  const me = await res.json()
+  if (!res.ok || me.code !== 0 || !me.data || String(me.data.email || '').toLowerCase() !== profile.panelEmail.toLowerCase()) return false
+  let providerIds = profile.cacheProviderIds || []
+  try {
+    const keysRes = await fetch(panelBaseFor(profile) + '/api/v1/api-keys?page=1&page_size=100', { headers: { Authorization: 'Bearer ' + data.access_token }, signal: AbortSignal.timeout(20000) })
+    const keyData = await keysRes.json()
+    if (keysRes.ok && keyData.code === 0) {
+      const items = Array.isArray(keyData.data) ? keyData.data : keyData.data.items || []
+      const keys = new Set(items.map(item => item.key).filter(Boolean))
+      const latest = loadConfig()
+      const matched = listCacheProviders(ccSwitchDatabasePath()).filter(p => keys.has(p.key)
+        && !latest.accounts.some(a => a.id !== accountId && (a.cacheProviderIds || []).includes(p.id))).map(p => p.id)
+      if (matched.length && !providerIds.length) providerIds = matched
+    }
+  } catch { /* 手动绑定保持可用，获取失败不能解除已有绑定。 */ }
+  const latest = loadConfig()
+  const accounts = latest.accounts.map(a => a.id === accountId ? { ...a, panelPassword: candidate.panelPassword, cacheProviderIds: providerIds } : a)
+  cfg = saveConfig({ accounts })
+  const authenticated = { ...candidate, cacheProviderIds: providerIds }
+  const session = { jwt: data.access_token, expiresAt: Date.now() + Math.max(1, Number(data.expires_in) || 86400) * 1000 - 30000,
+    refreshToken: data.refresh_token || '' }
+  try {
+    const claims = JSON.parse(Buffer.from(session.jwt.split('.')[1], 'base64url').toString('utf8'))
+    if (Number.isFinite(claims.exp)) session.expiresAt = Math.min(session.expiresAt, claims.exp * 1000 - 30000)
+  } catch {}
+  persistAccountSession(authenticated, session)
+  if (loadConfig().activeAccountId === accountId) {
+    accountRevision++; resetPanelAuth(); balanceInFlight = null; balanceCache = null
+    panelIdentity = accountIdentity(authenticated); panelJwt = session.jwt; panelJwtExpiresAt = session.expiresAt; panelAuthStatus = 'valid'
+    if (petWin && !petWin.isDestroyed()) petWin.webContents.send('pet:refresh')
+  }
+  invalidateLocalCacheStats()
+  broadcastAccounts({ authenticatedAccountId: accountId })
+  return true
+}
+
+function openAccountLogin() {
+  const c = loadConfig(), profile = c.accounts.find(a => a.id === c.activeAccountId)
+  let address
+  try { address = new URL(panelBaseFor(profile)); if (!['https:', 'http:'].includes(address.protocol)) throw new Error() }
+  catch { return { ok: false, error: '请先填写有效的站点地址' } }
+  const existing = webLoginWindows.get(profile.id)
+  if (existing && !existing.isDestroyed()) { existing.show(); existing.focus(); return { ok: true } }
+  const win = new BrowserWindow({ width: 1060, height: 800, title: profile.name + ' · 完成网页登录', icon: appIconPath,
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, partition: 'persist:account-login-' + fingerprint([profile.id, address.origin]) } })
+  webLoginWindows.set(profile.id, win)
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  win.webContents.on('will-navigate', (e, url) => { if (new URL(url).origin !== address.origin) e.preventDefault() })
+  const requests = new Map()
+  win.webContents.debugger.attach('1.3')
+  win.webContents.debugger.sendCommand('Network.enable').catch(() => {})
+  win.webContents.debugger.on('message', async (_event, method, params) => {
+    if (method === 'Network.requestWillBeSent' && params.request.url === address.origin + '/api/v1/auth/login') {
+      try {
+        const body = JSON.parse(params.request.postData || '{}')
+        requests.set(params.requestId, { panelEmail: body.email, panelPassword: body.password })
+      } catch {}
+    }
+    if (method === 'Network.loadingFinished' && requests.has(params.requestId)) {
+      const credentials = requests.get(params.requestId); requests.delete(params.requestId)
+      try {
+        const response = await win.webContents.debugger.sendCommand('Network.getResponseBody', { requestId: params.requestId })
+        const data = JSON.parse(response.base64Encoded ? Buffer.from(response.body, 'base64').toString('utf8') : response.body)
+        if (data.code === 0 && await acceptWebLogin(profile.id, data.data, credentials)) win.close()
+      } catch { /* 验证码/登录未完成时继续保留网页，不输出凭据或响应。 */ }
+    }
+  })
+  win.on('closed', () => webLoginWindows.delete(profile.id))
+  win.loadURL(address.origin + '/login').catch(() => {})
+  return { ok: true }
+}
+ipcMain.handle('pet:account-web-login', openAccountLogin)
 
 function resetPanelAuth() {
   panelJwt = null
@@ -581,11 +734,40 @@ async function ensurePanelJwt() {
   if (!cfg.panelEmail || !cfg.panelPassword) throw new Error('未配置面板账号')
   if (panelIdentity !== accountIdentity(cfg)) { resetPanelAuth(); panelIdentity = accountIdentity(cfg) }
   if (panelJwt && Date.now() < panelJwtExpiresAt) return panelJwt
+  const stored = storedAccountSession(cfg)
+  if (stored && stored.expiresAt > Date.now()) {
+    panelJwt = stored.jwt; panelJwtExpiresAt = stored.expiresAt; panelAuthStatus = 'valid'; return panelJwt
+  }
+  if (stored && stored.refreshToken) {
+    if (panelLoginInFlight) return panelLoginInFlight
+    const generation = panelAuthGeneration
+    const refresh = (async () => { try {
+      const res = await fetch(panelBaseFor(cfg) + '/api/v1/auth/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: stored.refreshToken }), signal: AbortSignal.timeout(20000) })
+      const data = await res.json()
+      if (generation !== panelAuthGeneration) throw new Error('账号已切换')
+      if (res.ok && data.code === 0 && data.data.access_token) {
+        const next = { jwt: data.data.access_token, refreshToken: data.data.refresh_token || stored.refreshToken,
+          expiresAt: Date.now() + Math.max(1, Number(data.data.expires_in) || 3600) * 1000 - 30000 }
+        persistAccountSession(cfg, next); panelJwt = next.jwt; panelJwtExpiresAt = next.expiresAt; panelAuthStatus = 'valid'; return panelJwt
+      }
+      invalidateAccountSession(cfg)
+    } catch (error) { if (generation !== panelAuthGeneration) throw error }
+    return null
+    })()
+    const request = refresh.then(token => {
+      if (panelLoginInFlight === request) panelLoginInFlight = null
+      return token || loginPanel(cfg)
+    }).finally(() => { if (panelLoginInFlight === request) panelLoginInFlight = null })
+    panelLoginInFlight = request
+    return request
+  }
   return loginPanel(cfg)
 }
 
 async function panelAuthedFetch(path) {
   const cfg = loadConfig()
+  const revision = accountRevision
   const identity = accountIdentity(cfg)
   const tryOnce = async (jwt) => fetch(panelBaseFor(cfg) + path, {
     headers: { Authorization: 'Bearer ' + jwt, Accept: 'application/json' },
@@ -595,17 +777,30 @@ async function panelAuthedFetch(path) {
   let res = await tryOnce(token)
   if (res.status === 401) {           // 过期/失效 → 重登一次再试
     if (identity !== accountIdentity(loadConfig())) throw new Error('登录配置已变更')
-    if (panelJwt === token) { panelJwt = null; panelJwtExpiresAt = 0 }
+    if (panelJwt === token) {
+      panelJwt = null; panelJwtExpiresAt = 0
+      const session = storedAccountSession(cfg)
+      if (session && session.refreshToken) persistAccountSession(cfg, { ...session, expiresAt: 0 })
+      else invalidateAccountSession(cfg)
+    }
     res = await tryOnce(await ensurePanelJwt())
   }
-  if (identity !== accountIdentity(loadConfig())) throw new Error('登录配置已变更')
+  if (revision !== accountRevision || identity !== accountIdentity(loadConfig())) throw new Error('登录配置已变更')
   const data = await res.json().catch(() => ({}))
   if (!res.ok || data.code !== 0) {
     if (res.status === 401 && panelIdentity === identity) { panelJwt = null; panelJwtExpiresAt = 0; panelAuthStatus = 'retrying' }
     const msg = (data && data.message) || ('HTTP ' + res.status)
     throw new Error(msg.slice(0, 120))
   }
+  if (revision !== accountRevision || identity !== accountIdentity(loadConfig())) throw new Error('登录配置已变更')
   return data.data
+}
+
+async function fetchAccountWalletBalance() {
+  const account = await panelAuthedFetch('/api/v1/auth/me')
+  const balance = pickNum(account && account.balance)
+  if (balance === undefined) throw new Error('账号接口未返回钱包余额')
+  return { ok: true, totalBalance: balance, currency: 'USD', quotaMode: 'wallet', isAvailable: true, cachedAt: Date.now() }
 }
 
 async function getAccountTodayStats() {
@@ -696,7 +891,7 @@ async function showCacheRateNotification(rate, sample, demo = false) {
     const time = value => new Date(value).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
     const n = new Notification({
     icon: appIconPath,
-      title: demo ? '1 分钟缓存告警测试（演示）' : '最近 1 分钟缓存率低于 80%',
+      title: demo ? '1 分钟缓存告警测试（演示）' : (sample.accountName ? sample.accountName + ' · ' : '') + '最近 1 分钟缓存率低于 80%',
       silent: c.cacheAlertSoundEnabled === false,
       body: 'CC Switch · 本机 Codex 代理\n' + time(sample.sampleStart) + '–' + time(sample.sampleEnd) + '\n缓存率 ' + (rate * 100).toFixed(1) + '% · 阈值 80% · ' + sample.validRequests + ' 个有效请求\n'
         + '缓存读取 ' + sample.cacheReadTokens + ' / 总输入 ' + sample.inputTokens + ' Token\n'
@@ -793,6 +988,11 @@ async function checkCacheMonitor(options = {}) {
       scheduleCacheMonitor()
       return cacheMonitorPublic()
     }
+    if (data.accountWindows) {
+      await checkAccountCacheNotifications(data, minute, current)
+      if (current()) scheduleCacheMonitor()
+      return cacheMonitorPublic()
+    }
     const sample = { ...data.minute, checkMinute: minute }
     const complete = sample.complete !== false
     const rate = complete && sample.inputTokens > 0 && Number.isFinite(sample.rate) ? sample.rate : null
@@ -814,6 +1014,35 @@ async function checkCacheMonitor(options = {}) {
   })()
   cacheMonitorInFlight = request
   try { return await request } finally { if (cacheMonitorInFlight === request) cacheMonitorInFlight = null }
+}
+
+async function checkAccountCacheNotifications(data, minute, current) {
+  const c = loadConfig()
+  const states = { ...(loadCacheMonitor().accountAlerts || {}) }
+  for (const account of c.accounts) {
+    if (!current()) return
+    const window = data.accountWindows[account.id]
+    const sample = { ...(window && window.minute || {}), checkMinute: minute, accountId: account.id, accountName: account.name }
+    const source = fingerprint(account.cacheProviderIds || [])
+    const previous = states[account.id] && states[account.id].source === source ? states[account.id] : {}
+    const rate = window && window.status === 'ok' && sample.complete !== false && sample.inputTokens > 0 && Number.isFinite(sample.rate) ? sample.rate : null
+    const status = !window || window.status !== 'ok' ? 'unconfigured' : sample.complete === false ? 'partial' : rate === null ? 'idle' : rate < .8 ? 'low' : 'ok'
+    states[account.id] = { ...previous, source, status, rate, checkedAt: Date.now(), sampleStart: sample.sampleStart || 0,
+      sampleEnd: sample.sampleEnd || 0, inputTokens: sample.inputTokens || 0, cacheReadTokens: sample.cacheReadTokens || 0,
+      validRequests: sample.validRequests || 0, lastCheckedMinute: minute }
+    if (status === 'low' && previous.lastAlertMinute !== minute && previous.lastAlertAttemptMinute !== minute) {
+      states[account.id].lastAlertAttemptMinute = minute
+      cacheMonitorSet({ accountAlerts: { ...states }, lastCheckedMinute: minute })
+      // 每个账号有自己的去重槽；通知确认期间不依赖当前显示的账号。
+      const shown = await showCacheRateNotification(rate, sample)
+      if (!current()) return
+      if (shown) { states[account.id].lastAlertMinute = minute; states[account.id].lastAlertAt = Date.now() }
+      else states[account.id].error = 'Windows 通知未确认，下一分钟再检查'
+    }
+  }
+  const active = states[loadConfig().activeAccountId] || {}
+  cacheMonitorSet({ ...active, accountAlerts: states, lastCheckedMinute: minute, sampledAt: data.sampledAt,
+    alertActive: Object.values(states).some(s => s.status === 'low') })
 }
 
 function startCacheMonitor(options = {}) {
@@ -1097,19 +1326,20 @@ async function fetchBalance() {
   balanceFetchCount++
   const cfgNow = loadConfig()
   const key = String(cfgNow.apiKey || '').trim()
-  if (!key) return { ok: false, code: 'NO_KEY', error: '未配置 API Key（右键托盘 → 设置）' }
+  if (!key && !panelAuthConfigured()) return { ok: false, code: 'NO_KEY', error: '未配置 API Key 或面板账号（右键托盘 → 设置）' }
   if (balanceInFlight) return balanceInFlight
   const sourceId = dataSourceIdentity(cfgNow)
+  const revision = accountRevision
   const request = (async () => {
     try {
       const payload = cfgNow.siteType === 'deepseek'
         ? await fetchDeepSeekBalance(cfgNow, key)
-        : await fetchSub2ApiBalance(cfgNow, key)
+        : key ? await fetchSub2ApiBalance(cfgNow, key) : await fetchAccountWalletBalance()
       if (!payload.ok) {
         if (!payload.transient) console.error('[relay-pet]', payload.code, payload.error)
         return payload
       }
-      if (sourceId !== dataSourceIdentity(loadConfig())) return { ok: false, code: 'CONFIG_CHANGED', error: '配置已变更，请重新刷新', transient: true }
+      if (revision !== accountRevision || sourceId !== dataSourceIdentity(loadConfig())) return { ok: false, code: 'CONFIG_CHANGED', error: '配置已变更，请重新刷新', transient: true }
       ensureStats()
       // 面板登录态：拉账号级真实今日消耗（actual_cost=实际扣除，跨全部 Key）
       if (panelAuthConfigured()) {
@@ -1129,7 +1359,7 @@ async function fetchBalance() {
           payload.accountError = '账号统计暂时无法更新'
         }
       }
-      if (sourceId !== dataSourceIdentity(loadConfig())) return { ok: false, code: 'CONFIG_CHANGED', error: '配置已变更，请重新刷新', transient: true }
+      if (revision !== accountRevision || sourceId !== dataSourceIdentity(loadConfig())) return { ok: false, code: 'CONFIG_CHANGED', error: '配置已变更，请重新刷新', transient: true }
       // 消耗统计
       if (cfgNow.trackStats) {
         recordBalance(Number(payload.totalBalance), cfgNow.siteType === 'deepseek')
@@ -1162,6 +1392,7 @@ async function fetchBalance() {
         }
       }
       payload.todaySource = stats.todaySource
+      payload.accountId = cfgNow.activeAccountId
       payload.todayStale = stats.todayStale
       balanceCache = { at: Date.now(), payload, sourceId }
       // 低余额提醒
@@ -1170,6 +1401,7 @@ async function fetchBalance() {
       }
       return payload
     } catch (err) {
+      if (revision !== accountRevision) return { ok: false, code: 'CONFIG_CHANGED', error: '账号已切换', transient: true }
       const msg = String((err && err.message) || err).slice(0, 200)
       if (balanceCache && balanceCache.sourceId === sourceId && Date.now() - balanceCache.at < 10 * 60 * 1000) {
         if (stats.todaySource === 'account') stats.todayStale = true
@@ -1662,7 +1894,12 @@ async function chooseCustomImage() {
 ipcMain.handle('pet:get-balance', () => fetchBalance())
 function getCacheMonitor() { return cacheMonitorPublic() }
 ipcMain.handle('pet:get-cache-monitor', () => getCacheMonitor())
-ipcMain.handle('pet:get-local-cache-stats', (_e, options) => getLocalCacheStats({ force: !!(options && options.force === true) }))
+ipcMain.handle('pet:get-local-cache-stats', async (_e, options) => {
+  const result = await getLocalCacheStats({ force: !!(options && options.force === true) })
+  const c = loadConfig(), selected = result.accountWindows && result.accountWindows[c.activeAccountId]
+  return selected ? { ...result, ...selected, accountId: c.activeAccountId, source: 'CC Switch · ' + c.accountName + ' · 本机 Codex 代理',
+    error: selected.status === 'unconfigured' ? '当前账号未绑定 CC Switch 分组，请完成网页登录自动匹配或在设置中选择。' : result.error } : result
+})
 ipcMain.handle('pet:pause-cache-monitor', (_e, hours) => pauseCacheMonitor(hours))
 ipcMain.handle('pet:resume-cache-monitor', () => resumeCacheMonitor())
 let cacheAlertTestInFlight = null
@@ -1675,6 +1912,7 @@ ipcMain.handle('pet:test-cache-alert', () => {
 async function getUsageWindow(hours = 24) {
   ensureStats()
   const c = loadConfig()
+  const revision = accountRevision
   const windowHours = usageHours(hours)
   const windowEnd = Date.now()
   // 最近 N 个小时段，包含当前未满小时；与面板的小时聚合口径一致。
@@ -1696,9 +1934,10 @@ async function getUsageWindow(hours = 24) {
       accountAuth = true
     } catch (err) { accountError = '账号用量暂时无法更新：' + String(err && err.message || err).slice(0, 120) }
   }
-  if (sourceId !== dataSourceIdentity(loadConfig())) throw new Error('账号配置已变更，请重新刷新统计')
+  if (revision !== accountRevision || sourceId !== dataSourceIdentity(loadConfig())) throw new Error('账号配置已变更，请重新刷新统计')
   return {
     siteType: c.siteType || 'sub2api',
+    accountId: c.activeAccountId,
     currency,
     mode: stats.mode || '',
     samples,
@@ -1814,11 +2053,13 @@ ipcMain.handle('pet:get-full-config', () => {
     showTime: !!c.showTime, lockPosition: c.lockPosition !== false,
     autoHideFullscreen: c.autoHideFullscreen !== false,
     panelEmail: c.panelEmail || '', hasPanelPassword: !!(c.panelPassword || ''),
+    ...accountList(), accountName: c.accountName, cacheProviderIds: c.cacheProviderIds || [],
   }
 })
-ipcMain.handle('pet:save-settings', (_e, settings) => {
+function saveSettings(_e, settings) {
   const s = settings || {}
   const cur = loadConfig()
+  if (s.accountId && s.accountId !== cur.activeAccountId) return { ok: false, error: '账号已切换，旧设置未写入新账号', code: 'ACCOUNT_CHANGED' }
   const bool = function (v, dft) { return typeof v === 'boolean' ? v : dft }
   // 部分保存（只传个别字段）时，未传的字段一律保留现值，不允许被空值/默认值覆盖
   const apiKey = s.apiKey === undefined ? cur.apiKey : String(s.apiKey || '').trim()
@@ -1875,6 +2116,18 @@ ipcMain.handle('pet:save-settings', (_e, settings) => {
     autoStart: bool(s.autoStart, !!cur.autoStart),
     alwaysOnTop: bool(s.alwaysOnTop, cur.alwaysOnTop !== false),
     showTime: bool(s.showTime, !!cur.showTime),
+    accountName: s.accountName === undefined ? cur.accountName : String(s.accountName || '').trim().slice(0, 80) || '账号',
+    cacheProviderIds: Array.isArray(s.cacheProviderIds) ? [...new Set(s.cacheProviderIds.filter(id => typeof id === 'string' && id.length <= 200))] : cur.cacheProviderIds || [],
+  }
+  if (s.activeAccountId) {
+    const chosen = cur.accounts.find(a => a.id === s.activeAccountId)
+    if (!chosen) return { ok: false, error: '账号不存在' }
+    patch.activeAccountId = chosen.id
+    patch.accountName = chosen.name
+    patch.accounts = cur.accounts
+  }
+  if (!s.activeAccountId && patch.cacheProviderIds.some(id => cur.accounts.some(a => a.id !== cur.activeAccountId && (a.cacheProviderIds || []).includes(id)))) {
+    return { ok: false, error: '该 CC Switch 分组已属于另一个账号，请先解除原绑定' }
   }
   const oldSource = dataSourceIdentity(cur)
   // 显式提交时，即使勾选值不变也重新注册和回查；失败不写入“已启用”。
@@ -1899,7 +2152,17 @@ ipcMain.handle('pet:save-settings', (_e, settings) => {
     if (autoStartResult && !SELF_TEST_MODE) updateAutoStart(cur.autoStart)
     return { ok: false, error: String(err.message || err), autoStartStatus: getAutoStartStatus() }
   }
-  if (panelAuthChanged) resetPanelAuth()
+  if (panelAuthChanged || oldSource !== newSource || patch.activeAccountId && patch.activeAccountId !== cur.activeAccountId) {
+    accountRevision++
+    if (panelJwt) accountSessions.set(accountIdentity(cur), { ...(storedAccountSession(cur) || {}), jwt: panelJwt, expiresAt: panelJwtExpiresAt })
+    resetPanelAuth()
+    const session = accountSessions.get(accountIdentity(cfg))
+    if (session && session.expiresAt > Date.now()) {
+      panelIdentity = accountIdentity(cfg); panelJwt = session.jwt; panelJwtExpiresAt = session.expiresAt; panelAuthStatus = 'valid'
+    }
+    balanceCache = null
+    balanceInFlight = null
+  }
   if (cfg.cacheMonitorEnabled !== cur.cacheMonitorEnabled) {
     cacheMonitorGeneration++
     stopCacheMonitor()
@@ -1921,6 +2184,7 @@ ipcMain.handle('pet:save-settings', (_e, settings) => {
     statsLoaded = true
     usageHistory = []
     usageHistoryLoaded = true
+    usageHistoryCompactedMinute = -1
     saveStats()
     saveUsageHistory()
     for (const name of ['history.json', 'usage-history.json']) {
@@ -1944,11 +2208,35 @@ ipcMain.handle('pet:save-settings', (_e, settings) => {
   applyDisplayMode()
   if (cfg.hotkey !== cur.hotkey) updateHotkey(cfg.hotkey)
   if (fsWatcherChanged) startFullscreenWatcher()
+  if (JSON.stringify(cur.cacheProviderIds) !== JSON.stringify(cfg.cacheProviderIds) && !s.activeAccountId) invalidateLocalCacheStats()
   if (petWin && !petWin.isDestroyed()) {
     petWin.webContents.send('pet:refresh')
     petWin.webContents.send('pet:config-updated')
   }
-  return { ok: true, hasKey: !!apiKey, autoStartStatus: autoStartResult || getAutoStartStatus() }
+  broadcastAccounts()
+  return { ok: true, hasKey: !!apiKey, autoStartStatus: autoStartResult || getAutoStartStatus(), ...accountList() }
+}
+ipcMain.handle('pet:save-settings', saveSettings)
+ipcMain.handle('pet:get-accounts', () => accountList())
+ipcMain.handle('pet:get-cache-providers', () => {
+  const c = loadConfig()
+  return listCacheProviders(ccSwitchDatabasePath()).map(p => ({ id: p.id, name: p.name,
+    assignedAccountId: (c.accounts.find(a => (a.cacheProviderIds || []).includes(p.id)) || {}).id || '' }))
+})
+ipcMain.handle('pet:switch-account', (e, id) => {
+  const c = loadConfig(), selected = c.accounts.find(a => a.id === id)
+  if (!selected) return { ok: false, error: '账号不存在' }
+  if (id === c.activeAccountId) return { ok: true, ...accountList() }
+  return saveSettings(e, { ...Object.fromEntries(ACCOUNT_FIELDS.map(key => [key, selected[key]])), activeAccountId: id })
+})
+ipcMain.handle('pet:add-account', () => {
+  const c = loadConfig()
+  if (c.accounts.length >= 10) return { ok: false, error: '最多保存 10 个账号' }
+  const id = require('node:crypto').randomUUID()
+  cfg = saveConfig({ accounts: [...c.accounts, { ...accountProfile(defaultConfig(), id), name: '账号 ' + (c.accounts.length + 1) }] })
+  invalidateLocalCacheStats()
+  broadcastAccounts()
+  return { ok: true, accountId: id, ...accountList() }
 })
 ipcMain.handle('pet:save-key', (_e, { apiKey }) => {
   cfg = saveConfig({ apiKey: String(apiKey || '').trim() })
@@ -2002,6 +2290,7 @@ if (!gotLock) {
   app.quit()
 } else {
   app.on('second-instance', (_event, argv) => {
+    if (argv.includes('--account-login')) { openAccountLogin(); return }
     if (argv.includes('--open-stats')) { openStats(); return }
     if (petWin && !petWin.isDestroyed()) {
       applyVisibility()

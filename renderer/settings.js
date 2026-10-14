@@ -51,6 +51,76 @@ var saveBtn = $('saveBtn')
 var testBtn = $('testBtn')
 var discardCloseBtn = $('discardCloseBtn')
 var statusEl = $('status')
+var accountSelect = $('accountSelect')
+var accountNameInput = $('accountNameInput')
+var cacheProviderSelect = $('cacheProviderSelect')
+var settingsAccountId = null
+var accountReloadRequest = 0
+var savedCacheProviderIds = []
+function loadAccountFields(c) {
+  settingsAccountId = c.activeAccountId
+  accountNameInput.value = c.accountName || ''
+  siteTypeSelect.value = c.siteType === 'deepseek' ? 'deepseek' : 'sub2api'
+  baseUrlInput.value = c.baseUrl || ''; panelEmailInput.value = c.panelEmail || ''
+  panelPasswordInput.value = ''; keyInput.value = c.apiKey || ''; urlInput.value = c.balanceUrl || ''
+  hasSavedPanelPassword = !!c.hasPanelPassword
+  panelPasswordInput.placeholder = hasSavedPanelPassword ? '已保存（留空保持不变，输入可修改）' : '面板登录密码'
+  accountSelect.replaceChildren()
+  c.accounts.forEach(function (a) { var o = document.createElement('option'); o.value=a.id; o.textContent=a.name; o.selected=a.id===settingsAccountId; accountSelect.appendChild(o) })
+  accountSelect.disabled = false
+  savedCacheProviderIds = c.cacheProviderIds || []
+  cacheProviderSelect.disabled = true
+  window.pet.getCacheProviders().then(function (providers) {
+    if (settingsAccountId !== c.activeAccountId) return
+    cacheProviderSelect.replaceChildren()
+    providers.forEach(function (p) {
+      var o=document.createElement('option');o.value=p.id;o.textContent=p.name
+      o.disabled=!!p.assignedAccountId && p.assignedAccountId!==settingsAccountId
+      o.selected=(c.cacheProviderIds || []).includes(p.id); cacheProviderSelect.appendChild(o)
+    })
+    cacheProviderSelect.disabled = false
+  }).catch(function () { show('CC Switch 分组读取失败，保留原绑定。','err') })
+  applySiteTypeVisibility()
+}
+function reloadAccountFields() {
+  var request = ++accountReloadRequest
+  return window.pet.getFullConfig().then(function (c) { if (request === accountReloadRequest) loadAccountFields(c) })
+}
+window.pet.onAccountsUpdated(function (data) {
+  if (!settingsReady) return
+  // 正常保存同一个账号只更新选项名称；外部切换取消旧防抖，旧请求靠 accountId 拒绝。
+  if (data.activeAccountId === settingsAccountId && data.authenticatedAccountId !== settingsAccountId) {
+    data.accounts.forEach(function (a) { var option=Array.prototype.find.call(accountSelect.options,function(o){return o.value===a.id}); if(option)option.textContent=a.name })
+    return
+  }
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer=null }
+  savedSettingsRevision=settingsRevision
+  reloadAccountFields().catch(function () { show('账号字段加载失败，请重新打开设置','err') })
+})
+accountSelect.addEventListener('change', async function () {
+  var target = accountSelect.value
+  accountSelect.disabled=true
+  var saved=await saveCurrentSettings()
+  if (saved && saved.ok) {
+    var result=await window.pet.switchAccount(target)
+    if (!result || !result.ok) show(result && result.error || '切换失败','err')
+  } else show(saved && saved.error || '保存失败，未切换','err')
+  await reloadAccountFields()
+})
+$('addAccountBtn').addEventListener('click', async function () {
+  var saved=await saveCurrentSettings()
+  if (!saved || !saved.ok) { show(saved && saved.error || '保存失败','err'); return }
+  var added=await window.pet.addAccount()
+  if (added && added.ok) await window.pet.switchAccount(added.accountId)
+  else show(added && added.error || '新增失败','err')
+  await reloadAccountFields()
+})
+$('webLoginBtn').addEventListener('click', async function () {
+  var saved=await saveCurrentSettings()
+  if (!saved || !saved.ok) { show(saved && saved.error || '保存失败','err'); return }
+  var result=await window.pet.accountWebLogin()
+  show(result && result.ok ? '请在登录窗口完成验证码，登录后自动同步。' : result && result.error || '无法打开登录窗口',result && result.ok?'ok':'err')
+})
 
 function show(msg, cls) {
   statusEl.textContent = msg
@@ -85,6 +155,7 @@ siteTypeSelect.addEventListener('change', function () {
   applySiteTypeVisibility()
   scheduleSave()
 })
+cacheProviderSelect.addEventListener('change', function () { scheduleSave() })
 
 scaleInput.addEventListener('input', function () {
   scaleVal.textContent = scaleInput.value + '%'
@@ -192,10 +263,10 @@ function saveCurrentSettings(explicit) {
   if (!settingsReady) return Promise.resolve({ ok: false, error: '设置尚未加载，请稍后重试' })
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
   pendingSaves++
+  var patch = collect()
   saveQueue = saveQueue.catch(function () {}).then(function () {
     var revision = autoStartRevision
     var editRevision = settingsRevision
-    var patch = collect()
     // 普通字段自动保存不重复注册开机自启；手动保存仍可重试同值注册。
     if (explicit !== true && revision === savedAutoStartRevision) delete patch.autoStart
     return window.pet.saveSettings(patch).then(function (result) {
@@ -255,6 +326,7 @@ function requestSettingsClose() {
 }
 window.pet.getFullConfig().then(function (c) {
   if (!c) throw new Error('未取得配置')
+  loadAccountFields(c)
   siteTypeSelect.value = (c.siteType === 'deepseek') ? 'deepseek' : 'sub2api'
   if (c.baseUrl) baseUrlInput.value = c.baseUrl
   if (c.panelEmail) panelEmailInput.value = c.panelEmail
@@ -305,6 +377,9 @@ function num(v, dft) {
 
 function collect() {
   return {
+    accountId: settingsAccountId,
+    accountName: accountNameInput.value.trim(),
+    cacheProviderIds: cacheProviderSelect.disabled ? savedCacheProviderIds : Array.prototype.filter.call(cacheProviderSelect.options,function(o){return o.selected}).map(function(o){return o.value}),
     apiKey: keyInput.value.trim(),
     siteType: siteTypeSelect.value === 'deepseek' ? 'deepseek' : 'sub2api',
     baseUrl: baseUrlInput.value.trim(),

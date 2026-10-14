@@ -27,6 +27,54 @@ var localCacheMessage = document.getElementById('localCacheMessage')
 var selectedHours = 24
 var drawRequest = 0
 var localCacheRefresh = null
+var statsAccountId = null
+var accountSwitchPending = false
+
+function clearAccountStatistics() {
+  drawRequest++
+  ;[cBalance,cUsed,cToday,cCacheRate,cCacheTokens,document.getElementById('cRequests'),document.getElementById('cTokens')].forEach(function (el) { el.textContent = '--' })
+  ctx.clearRect(0,0,canvas.width,canvas.height); cacheCtx.clearRect(0,0,cacheCanvas.width,cacheCanvas.height)
+  document.getElementById('rangeInfo').textContent = '正在读取所选账号…'
+  refreshInfo.textContent = '正在切换账号…'
+}
+function renderAccounts(data) {
+  if (!data) return
+  var changed = statsAccountId !== null && statsAccountId !== data.activeAccountId
+  statsAccountId = data.activeAccountId
+  var box = document.getElementById('accountButtons'); box.replaceChildren()
+  data.accounts.forEach(function (account) {
+    var button = document.createElement('button')
+    button.type = 'button'; button.textContent = account.name
+    button.setAttribute('aria-pressed', String(account.id === statsAccountId))
+    button.disabled = accountSwitchPending
+    button.addEventListener('click', function () {
+      if (accountSwitchPending || account.id === statsAccountId) return
+      accountSwitchPending = true
+      Array.prototype.forEach.call(box.querySelectorAll('button'), function (b) { b.disabled = true })
+      window.pet.switchAccount(account.id).then(function (result) {
+        if (!result || !result.ok) throw new Error(result && result.error || '切换失败')
+        renderAccounts(result)
+      }).catch(function (error) { document.getElementById('accountStatus').textContent = error.message })
+        .finally(function () { accountSwitchPending = false; window.pet.getAccounts().then(renderAccounts) })
+    })
+    box.appendChild(button)
+  })
+  var active = data.accounts.find(function (a) { return a.id === statsAccountId })
+  document.getElementById('accountStatus').textContent = '当前：' + (active ? active.name : '账号') + ' · 切换同时更新桌宠，所有已绑定账号的缓存告警继续运行。'
+  if (changed || data.authenticatedAccountId === statsAccountId) {
+    clearAccountStatistics()
+    renderLocalCacheStats({ status:'pending' })
+    refreshLocalCacheStats(true); refreshCacheMonitor()
+    window.pet.getBalance().then(draw).catch(draw)
+  }
+}
+window.pet.getAccounts().then(renderAccounts)
+window.pet.onAccountsUpdated(renderAccounts)
+document.getElementById('accountLoginBtn').addEventListener('click', function () {
+  window.pet.accountWebLogin().then(function (result) {
+    document.getElementById('accountStatus').textContent = result && result.ok ? '请在登录窗口完成验证码，登录后会自动同步。' : result && result.error || '登录窗口无法打开'
+  })
+})
 
 var COLORS = {
   line: '#9d7ff5',           // 余额线：紫色，更醒目
@@ -80,6 +128,7 @@ function renderLocalCacheWindow(key, sample, status) {
   infoEl.textContent = cacheWindowDetails(sample) + (partial ? ' · 本窗口不告警' : '')
 }
 function renderLocalCacheStats(data) {
+  if (data && data.accountId && statsAccountId && data.accountId !== statsAccountId) return
   if (!localCachePanel) return
   var status = data && data.status || 'error'
   localCachePanel.classList.toggle('error', status === 'error')
@@ -111,6 +160,8 @@ async function refreshLocalCacheStats(force) {
   return localCacheRefresh
 }
 function renderCacheMonitor(m) {
+  document.getElementById('accountCacheStatus').textContent = m && m.accounts && m.accounts.length
+    ? '独立缓存告警：' + m.accounts.map(function(a){return a.name+' '+(a.status==='unconfigured'?'未绑定 CC Switch 分组':(monitorStatusText[a.status] || a.status)+(a.rate===null || a.rate===undefined?'':' '+pct(a.rate)))}).join('；') : ''
   if (!cacheMonitorPanel) return
   if (!m) { cacheMonitorPanel.style.display = 'none'; return }
   cacheMonitorPanel.style.display = 'flex'
@@ -186,7 +237,7 @@ function draw() {
   refreshBtn.disabled = true
   refreshInfo.textContent = '正在更新…'
   return window.pet.getUsageWindow(hours).then(function (data) {
-    if (!data || request !== drawRequest) return
+    if (!data || request !== drawRequest || data.accountId && statsAccountId && data.accountId !== statsAccountId) return
     var samples = data.samples || [], currency = data.currency || (data.siteType === 'deepseek' ? 'CNY' : 'USD'), sym = symFor(currency)
     // 已配置账号而同步失败时只画余额；不把余额下降估算冒充账号消费。
     var trend = data.accountConfigured && !data.accountAuth ? [] : data.accountTrend

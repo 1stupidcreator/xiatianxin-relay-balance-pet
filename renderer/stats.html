@@ -488,9 +488,24 @@
     }
   }
 </style>
+<style>
+  .account-switcher { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:12px 0 20px; }
+  .account-switcher button { font:inherit; padding:8px 14px; color:var(--text-primary); background:var(--surface-1); border:1px solid var(--surface-border); border-radius:8px; cursor:pointer; }
+  .account-switcher button:hover { background:#30302c; }
+  .account-switcher button[aria-pressed="true"] { border-color:var(--accent-primary); color:var(--accent-primary); background:rgba(199,216,172,.14); }
+  .account-switcher button:focus-visible { outline:2px solid var(--accent-primary); outline-offset:2px; }
+  .account-switcher button:disabled { opacity:.6; cursor:wait; }
+  #accountStatus { color:var(--text-secondary); font-size:13px; flex-basis:100%; }
+  #accountCacheStatus { color:var(--text-secondary); margin:12px 0 20px; line-height:1.7; }
+</style>
 </head>
 <body>
   <h1><span id="windowTitle">使用与缓存统计</span><span id="refreshInfo" role="status" aria-live="polite"></span></h1>
+  <div class="account-switcher" aria-label="当前账号">
+    <div id="accountButtons" class="account-switcher" style="margin:0"></div>
+    <button id="accountLoginBtn" type="button">网页登录 / 验证码</button>
+    <span id="accountStatus" role="status" aria-live="polite">正在加载账号…</span>
+  </div>
   <section id="localCachePanel" aria-labelledby="localCacheTitle">
     <div class="local-cache-heading"><h2 id="localCacheTitle">CC Switch 实时缓存</h2><span id="localCacheUpdated">正在采样…</span></div>
     <p id="localCacheSource">CC Switch · 本机 Codex 代理 · 仅本机代理记录，不代表账号全部 Key</p>
@@ -515,6 +530,7 @@
     <span id="cacheMonitorInfo">每分钟读取 CC Switch 最近 60 秒数据，低于 80% 时通知；无有效用量不告警。</span>
   </div>
   <h2 class="account-history-heading">JWT 账号历史统计</h2>
+  <p id="accountCacheStatus" role="status" aria-live="polite"></p>
   <div class="toolbar" aria-label="账号历史统计时间范围"><span>时间范围</span><button class="range-btn active" data-hours="24" aria-pressed="true">24 小时</button><button class="range-btn" data-hours="72" aria-pressed="false">72 小时</button><button class="range-btn" data-hours="144" aria-pressed="false">144 小时</button><button id="refreshBtn" class="range-btn refresh">刷新全部</button></div>
   <div id="rangeInfo">正在读取账号历史用量…</div>
   <div class="cards">

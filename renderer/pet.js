@@ -75,6 +75,22 @@ var state = {
   quotes: [],
 }
 var busy = false
+var petAccountEpoch = 0
+var petAccountId = null
+window.pet.onAccountsUpdated(function (data) {
+  if (petAccountId === data.activeAccountId && data.authenticatedAccountId !== petAccountId) return
+  petAccountId = data.activeAccountId
+  petAccountEpoch++
+  busy = false
+  if (animId) { cancelAnimationFrame(animId); animId=null }
+  if (amountSettleTimer) { clearTimeout(amountSettleTimer); amountSettleTimer=null }
+  state.balance=null; lastKnownTodayUsed=null; lastKnownTodayStale=false; state.status='loading'
+  amountEl.classList.remove('dshp-low')
+  var active=data.accounts.find(function(a){return a.id===petAccountId})
+  root.title=active ? '当前账号：'+active.name : ''
+  render(); refresh(false)
+})
+window.pet.getAccounts().then(function(data){petAccountId=data.activeAccountId})
 var settleTimer = null
 var amountSettleTimer = null
 var drag = null
@@ -301,6 +317,7 @@ window.__dshpAudioTest = function () {
 function refresh(manual) {
   if (busy) return
   busy = true
+  var epoch = petAccountEpoch
   // 自动/手动刷新都保留旧数字，新值到达后直接从旧值滚动动画；
   // 只有首次加载（还没有任何余额）才显示加载态
   if (state.balance === null) { state.status = 'loading'; render() }
@@ -310,6 +327,7 @@ function refresh(manual) {
     : window.pet.getBalance()
   balancePromise
     .then(function (data) {
+      if (epoch !== petAccountEpoch) return
       if (data && data.ok) {
         var nb = Number(data.totalBalance)
         var nc = String(data.currency || 'CNY')
@@ -349,11 +367,12 @@ function refresh(manual) {
       }
     })
     .catch(function () {
+      if (epoch !== petAccountEpoch) return
       state.status = 'error'
       state.message = '获取失败'
       render()
     })
-    .finally(function () { busy = false })
+    .finally(function () { if (epoch === petAccountEpoch) busy = false })
 }
 
 function shownAmount() {
@@ -414,7 +433,9 @@ function todayLine() {
 var lastKnownTodayUsed = null
 var lastKnownTodayStale = false
 function updateTodayUsedFromStats() {
+  var epoch = petAccountEpoch
   window.pet.getStats().then(function (st) {
+    if (epoch !== petAccountEpoch) return
     lastKnownTodayUsed = st && typeof st.todayUsed === 'number' ? st.todayUsed : null
     lastKnownTodayStale = !!(st && (st.todayStale || st.todaySource === 'pending'))
     hintEl.title = st && st.todaySource === 'pending' ? '账号统计尚未同步，请检查设置中的面板账号'

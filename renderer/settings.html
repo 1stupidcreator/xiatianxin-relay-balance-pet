@@ -533,6 +533,11 @@
   <div class="scroll">
     <div class="group">
       <h2>账户</h2>
+      <label class="field" for="accountSelect">当前账号（与统计页、桌宠同步）</label>
+      <select id="accountSelect" disabled></select>
+      <div class="row2"><button id="addAccountBtn" type="button">新增账号</button><button id="webLoginBtn" type="button">网页登录 / 验证码</button></div>
+      <label class="field" for="accountNameInput">账号名称</label>
+      <input type="text" id="accountNameInput" maxlength="80" placeholder="用于快速切换和通知" />
       <label class="field" for="siteTypeSelect">站点类型</label>
       <select id="siteTypeSelect">
         <option value="sub2api">Sub2API 中转站（余额走 /v1/usage）</option>
@@ -548,10 +553,13 @@
         <label class="field" for="panelPasswordInput">面板密码</label>
         <input type="password" id="panelPasswordInput" placeholder="面板登录密码" autocomplete="off" />
         <div class="tip">填写后自动登录面板（JWT），「今日已用」和 24 小时统计将显示<b>账号级真实消耗</b>（实际扣除，跨全部 Key）；留空则用本地余额差值估算。密码仅保存在本机 config.json。</div>
+        <label class="field" for="cacheProviderSelect">此账号的 CC Switch 分组</label>
+        <select id="cacheProviderSelect" multiple size="4" aria-describedby="cacheProviderTip"></select>
+        <div class="tip" id="cacheProviderTip">网页登录后按账号 Key 自动匹配；也可按住 Ctrl 多选。每个分组只能归一个账号。所有已绑定账号每分钟独立检查，显示哪个账号都不影响告警；未绑定时不冒用其他账号的数据。</div>
       </div>
 
       <label class="field" for="keyInput">API Key</label>
-      <input type="password" id="keyInput" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+      <input type="password" id="keyInput" placeholder="sk-...（面板账号可留空，使用账号钱包余额）" autocomplete="off" spellcheck="false" />
 
       <label class="field" for="labelInput">余额名称</label>
       <input type="text" id="labelInput" placeholder="账号余额" autocomplete="off" spellcheck="false" />

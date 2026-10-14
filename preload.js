@@ -23,6 +23,16 @@ contextBridge.exposeInMainWorld('pet', {
   getFullConfig: () => ipcRenderer.invoke('pet:get-full-config'),
   saveApiKey: (apiKey) => ipcRenderer.invoke('pet:save-key', { apiKey }),
   saveSettings: (settings) => ipcRenderer.invoke('pet:save-settings', settings),
+  getAccounts: () => ipcRenderer.invoke('pet:get-accounts'),
+  switchAccount: (id) => ipcRenderer.invoke('pet:switch-account', id),
+  addAccount: () => ipcRenderer.invoke('pet:add-account'),
+  getCacheProviders: () => ipcRenderer.invoke('pet:get-cache-providers'),
+  accountWebLogin: () => ipcRenderer.invoke('pet:account-web-login'),
+  onAccountsUpdated: (cb) => {
+    const listener = (_event, data) => cb(data)
+    ipcRenderer.on('pet:accounts-updated', listener)
+    return () => ipcRenderer.removeListener('pet:accounts-updated', listener)
+  },
   // 统计
   getStats: () => ipcRenderer.invoke('pet:get-stats'),
   getUsage24h: () => ipcRenderer.invoke('pet:get-usage-24h'),
